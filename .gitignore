@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.kuri/
+*.log
+.DS_Store

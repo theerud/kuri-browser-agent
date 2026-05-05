@@ -1,0 +1,30 @@
+{
+  "name": "kuri-browser-agent",
+  "version": "0.1.0",
+  "description": "Kuri-powered browser agent extension with MCP bridge.",
+  "settings": [
+    {
+      "key": "kuriPath",
+      "type": "string",
+      "default": "kuri",
+      "description": "Path to the kuri binary (e.g., /usr/local/bin/kuri)"
+    },
+    {
+      "key": "proxy",
+      "type": "string",
+      "description": "Default proxy URL (e.g., http://user:pass@proxy.com:8080)"
+    },
+    {
+      "key": "headless",
+      "type": "boolean",
+      "default": true,
+      "description": "Run the browser in headless mode"
+    }
+  ],
+  "mcpServers": {
+    "kuri": {
+      "command": "node",
+      "args": ["/home/tlt/src/tltsrc/gemini-cli-expr/kuri-browser-agent/mcp-server/dist/index.js"]
+    }
+  }
+}
