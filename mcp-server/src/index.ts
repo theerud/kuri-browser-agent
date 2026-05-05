@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -7,10 +10,13 @@ import {
 import { z } from "zod";
 import { KuriEngine } from "./kuri-engine.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8"));
+
 const server = new Server(
   {
-    name: "kuri-browser-server",
-    version: "0.1.0",
+    name: pkg.name || "kuri-browser-server",
+    version: pkg.version,
   },
   {
     capabilities: {
