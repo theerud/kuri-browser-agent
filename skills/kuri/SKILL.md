@@ -1,17 +1,15 @@
 ---
 name: kuri
-description: Browser automation using the Kuri engine via MCP. Use when you need to navigate web pages, take accessibility snapshots, and interact with elements via the @eN reference system.
+description: Browser automation using the Kuri engine. Use when you need to navigate web pages, take accessibility snapshots, and interact with elements via the @eN reference system.
 ---
 
-# Kuri Browser Automation Skill (MCP Edition)
+# Kuri Browser Automation Skill
 
-This skill covers the use of the Kuri browser automation engine through the Model Context Protocol (MCP). Kuri is a token-efficient browser server that provides a compact accessibility tree.
-
-## The MCP Advantage
-
-The Kuri extension uses an MCP server to manage the browser lifecycle. Use the qualified `mcp_kuri_` tools for all interactions.
+This skill covers the use of the Kuri browser automation engine. Kuri is a token-efficient browser that provides a compact accessibility tree to help you navigate and interact with web pages.
 
 ## Core Interaction Loop
+
+Use the available `mcp_kuri_*` tools to interact with the browser:
 
 1.  **Configure (Optional)**: Set the device or environment.
     - Example: `mcp_kuri_configure(preset="iphone_15")`
