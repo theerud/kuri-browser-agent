@@ -51,7 +51,6 @@ export class KuriEngine extends EventEmitter {
   private sessionId: string = `mcp-session-${Math.random().toString(36).substring(7)}`;
   private kuriPath: string = "kuri";
   private currentTabId: string | null = null;
-  private userDataDir: string | null = null;
   private currentConfig: any = {
     headless: true,
     proxy: null,
@@ -69,16 +68,13 @@ export class KuriEngine extends EventEmitter {
           if (this.kuriProcess.pid) process.kill(-this.kuriProcess.pid, "SIGKILL");
         } catch (e) {}
       }
-      if (this.userDataDir) {
-        try { fs.rmSync(this.userDataDir, { recursive: true, force: true }); } catch (e) {}
-      }
     };
     process.on("exit", cleanup);
     process.on("SIGINT", () => { cleanup(); process.exit(); });
     process.on("SIGTERM", () => { cleanup(); process.exit(); });
   }
 
-  public async killKuri() {
+  private async killKuri() {
     if (this.kuriProcess) {
       const proc = this.kuriProcess;
       this.kuriProcess = null; // Prevent re-entry
@@ -103,12 +99,6 @@ export class KuriEngine extends EventEmitter {
         }
       } catch (e) {
         try { proc.kill("SIGKILL"); } catch (ee) {}
-      } finally {
-        if (this.userDataDir) {
-          console.error(`Cleaning up Chromium data: ${this.userDataDir}`);
-          try { fs.rmSync(this.userDataDir, { recursive: true, force: true }); } catch (e) {}
-          this.userDataDir = null;
-        }
       }
     }
   }
@@ -156,17 +146,6 @@ export class KuriEngine extends EventEmitter {
         const res = await fetch(`${this.baseUrl}/health`);
         if (res.ok) {
           console.error(`Kuri is healthy on port ${this.port}`);
-          // Detect user data dir from process tree
-          try {
-            const { execSync } = await import("node:child_process");
-            // Find the child Chromium process of our Kuri PID and extract --user-data-dir
-            const output = execSync(`ps -eo ppid,args | grep "^ *${this.kuriProcess!.pid} " | grep -o -e "--user-data-dir=[^ ]*"`, { encoding: "utf8" });
-            const match = output.match(/--user-data-dir=([^ ]+)/);
-            if (match) {
-              this.userDataDir = match[1];
-              console.error(`Detected Chromium user data dir: ${this.userDataDir}`);
-            }
-          } catch (e) { /* ignore detection failures */ }
           return;
         }
       } catch (e) {
@@ -175,7 +154,7 @@ export class KuriEngine extends EventEmitter {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    await this.killKuri();
+    this.killKuri();
     throw new Error("Kuri failed to start after 20 seconds");
   }
 
@@ -562,5 +541,6 @@ export class KuriEngine extends EventEmitter {
         },
       ],
     };
-  }
 }
+}
+
