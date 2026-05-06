@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
+import net from "net";
 
 interface Preset {
   userAgent: string;
@@ -43,7 +44,7 @@ const PRESETS: Record<string, Preset> = {
 export class KuriEngine extends EventEmitter {
   private kuriProcess: ChildProcess | null = null;
   private port: number = 8080;
-  private baseUrl: string = `http://127.0.0.1:${this.port}`;
+  private get baseUrl(): string { return `http://127.0.0.1:${this.port}`; }
   private sessionId: string = `mcp-session-${Math.random().toString(36).substring(7)}`;
   private kuriPath: string = "kuri";
   private currentTabId: string | null = null;
@@ -59,41 +60,63 @@ export class KuriEngine extends EventEmitter {
 
   private setupCleanup() {
     const cleanup = () => {
-      this.killKuri();
+      if (this.kuriProcess) {
+        try {
+          if (this.kuriProcess.pid) process.kill(-this.kuriProcess.pid, "SIGKILL");
+        } catch (e) {}
+      }
     };
     process.on("exit", cleanup);
     process.on("SIGINT", () => { cleanup(); process.exit(); });
     process.on("SIGTERM", () => { cleanup(); process.exit(); });
   }
 
-  private killKuri() {
+  private async killKuri() {
     if (this.kuriProcess) {
-      console.error(`Killing Kuri process ${this.kuriProcess.pid}...`);
+      const proc = this.kuriProcess;
+      this.kuriProcess = null; // Prevent re-entry
+
+      console.error(`Killing Kuri process ${proc.pid}...`);
       try {
-        if (this.kuriProcess.pid) {
-          process.kill(-this.kuriProcess.pid, "SIGKILL");
+        if (proc.pid) {
+          process.kill(-proc.pid, "SIGTERM");
+
+          // Wait for process to exit or timeout and SIGKILL
+          await new Promise<void>((resolve) => {
+            const timeout = setTimeout(() => {
+              try { if (proc.pid) process.kill(-proc.pid, "SIGKILL"); } catch (e) {}
+              resolve();
+            }, 2000);
+
+            proc.on("exit", () => {
+              clearTimeout(timeout);
+              resolve();
+            });
+          });
         }
       } catch (e) {
-        this.kuriProcess.kill("SIGKILL");
+        try { proc.kill("SIGKILL"); } catch (ee) {}
       }
-      this.kuriProcess = null;
     }
+  }
+
+  private async getFreePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.unref();
+      server.on("error", reject);
+      server.listen(0, () => {
+        const { port } = server.address() as net.AddressInfo;
+        server.close(() => resolve(port));
+      });
+    });
   }
 
   private async ensureRunning() {
     if (this.kuriProcess) return;
 
-    try {
-      const res = await fetch(`${this.baseUrl}/health`);
-      if (res.ok) {
-        console.error("Kuri already running on port 8080");
-        return;
-      }
-    } catch (e) {
-      // expected
-    }
-
-    console.error(`Starting Kuri process: ${this.kuriPath}`);
+    this.port = await this.getFreePort();
+    console.error(`Starting Kuri process: ${this.kuriPath} on port ${this.port}`);
     const env = { ...process.env, PORT: this.port.toString(), HEADLESS: this.currentConfig.headless.toString() };
     if (this.currentConfig.proxy) {
       (env as any).KURI_PROXY = this.currentConfig.proxy;
@@ -113,7 +136,7 @@ export class KuriEngine extends EventEmitter {
       try {
         const res = await fetch(`${this.baseUrl}/health`);
         if (res.ok) {
-          console.error("Kuri is healthy");
+          console.error(`Kuri is healthy on port ${this.port}`);
           return;
         }
       } catch (e) {
@@ -121,19 +144,19 @@ export class KuriEngine extends EventEmitter {
       }
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    
+
     this.killKuri();
     throw new Error("Kuri failed to start after 20 seconds");
   }
 
   private async request(path: string, options: any = {}) {
     await this.ensureRunning();
-    
+
     const urlObj = new URL(path, this.baseUrl);
     if (this.currentTabId && !urlObj.searchParams.has("tab_id")) {
       urlObj.searchParams.set("tab_id", this.currentTabId);
     }
-    
+
     const res = await fetch(urlObj.toString(), {
       ...options,
       headers: {
@@ -183,9 +206,9 @@ export class KuriEngine extends EventEmitter {
       content: [
         {
           type: "text",
-          text: `Browser configured: ${JSON.stringify({ 
-            preset: args.preset, 
-            userAgent: effectiveUA, 
+          text: `Browser configured: ${JSON.stringify({
+            preset: args.preset,
+            userAgent: effectiveUA,
             viewport: effectiveWidth ? `${effectiveWidth}x${effectiveHeight}` : "default",
             proxy: this.currentConfig.proxy,
             headless: this.currentConfig.headless
@@ -206,7 +229,7 @@ export class KuriEngine extends EventEmitter {
     // 2. Navigate the tab
     const res = await this.request(`/navigate?url=${encodeURIComponent(url)}`);
     const data = await res.json() as any;
-    
+
     return {
       content: [
         {
@@ -271,7 +294,7 @@ export class KuriEngine extends EventEmitter {
   }
 
   async restart() {
-    this.killKuri();
+    await this.killKuri();
     this.sessionId = `mcp-session-${Math.random().toString(36).substring(7)}`;
     this.currentTabId = null;
     return {
@@ -282,5 +305,6 @@ export class KuriEngine extends EventEmitter {
         },
       ],
     };
-  }
 }
+}
+
