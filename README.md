@@ -64,4 +64,4 @@ The agent will use the `mcp_kuri_` tools to navigate, snapshot, and extract cont
 
 ## License
 
-Apache-2.0
+MIT
