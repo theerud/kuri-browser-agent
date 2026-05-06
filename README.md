@@ -45,10 +45,15 @@ The agent will use the `mcp_kuri_` tools to navigate, snapshot, and extract cont
 
 - `mcp_kuri_navigate`: Go to a URL.
 - `mcp_kuri_snapshot`: Get the compact accessibility tree.
-- `mcp_kuri_click` / `mcp_kuri_type`: Interact with elements.
+- `mcp_kuri_click` / `mcp_kuri_type`: Interact with elements using `@eN` references.
+- `mcp_kuri_scroll` / `mcp_kuri_hover` / `mcp_kuri_press`: High-fidelity interaction tools.
 - `mcp_kuri_read`: Extract full page text or Markdown.
+- `mcp_kuri_screenshot`: Take viewport or element-level screenshots.
+- `mcp_kuri_evaluate`: Execute custom JavaScript in the browser.
 - `mcp_kuri_configure`: Set device presets, proxies, or user agents.
+- `mcp_kuri_wait`: Server-side delay for timing-sensitive tasks.
 - `mcp_kuri_restart`: Restart the browser for a fresh session.
+- `mcp_kuri_list_tabs` / `mcp_kuri_close_tab`: Manage multiple browser tabs.
 
 ## Architecture
 

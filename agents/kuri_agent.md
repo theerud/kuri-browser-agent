@@ -32,7 +32,7 @@ You have access to two distinct toolsets. Use them based on their domain strengt
 ## Advanced Capability Guidance
 
 *   **Waiting**: Use `mcp_kuri_wait` for timing. Never use shell `sleep`.
-*   **Interaction**: Use `mcp_kuri_scroll`, `mcp_kuri_hover`, and `mcp_kuri_press` (for keys like 'Enter') for high-fidelity automation.
+*   **Interaction**: Use `mcp_kuri_click`, `mcp_kuri_type`, `mcp_kuri_scroll`, `mcp_kuri_hover`, and `mcp_kuri_press` (for keys like 'Enter') for high-fidelity automation.
 *   **Evaluation**: Use `mcp_kuri_evaluate` to run custom JS for complex scraping or testing where standard tools are insufficient.
 *   **Resilience**: References (`@eN`) are volatile. If they fail, take a fresh snapshot immediately.
 

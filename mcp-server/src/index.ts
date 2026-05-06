@@ -182,6 +182,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "type",
+        description: "Type text into an element by its @eN reference.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            ref: { type: "string", description: "The @eN reference of the element to type into." },
+            text: { type: "string", description: "The text to type." },
+          },
+          required: ["ref", "text"],
+        },
+      },
+      {
         name: "restart",
         description: "Restarts the browser engine to clear session state and start fresh.",
         inputSchema: {
@@ -209,6 +221,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return await engine.snapshot((args as any).filter);
       case "scroll":
         return await engine.scroll((args as any).direction);
+      case "click":
+        return await engine.click((args as any).ref);
+      case "type":
+        return await engine.type((args as any).ref, (args as any).text);
       case "hover":
         return await engine.hover((args as any).ref);
       case "press":
