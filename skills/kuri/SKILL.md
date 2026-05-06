@@ -11,18 +11,28 @@ This skill covers the use of the Kuri browser automation engine. Kuri is a token
 
 Use the available `mcp_kuri_*` tools to interact with the browser:
 
-1.  **Configure (Optional)**: Set the device or environment.
-    - Example: `mcp_kuri_configure(preset="iphone_15")`
-2.  **Navigate**: Go to the URL.
-    - Example: `mcp_kuri_navigate(url="https://example.com")`
-3.  **Snapshot**: Get the compact accessibility tree. **This is your primary way to "see" the page.**
-    - Example: `mcp_kuri_snapshot()` -> Result: `[Link] "Login" @e4`
-4.  **Interact**: Perform actions using the `@eN` references.
-    - Example: `mcp_kuri_click(ref="@e4")`
-5.  **Verify & Read**: Take a new snapshot or read the content.
-    - Example: `mcp_kuri_read(format="markdown")`
-6.  **Restart**: Reset for a fresh session.
-    - Example: `mcp_kuri_restart()`
+### 1. Navigation & Configuration
+- **Configure**: Set device or environment. `mcp_kuri_configure(preset="iphone_15")`
+- **Navigate**: Go to a URL. `mcp_kuri_navigate(url="https://example.com")`
+- **Wait**: Wait for a duration. `mcp_kuri_wait(delay_ms=2000)` (Avoid shell sleeps).
+- **Restart**: Fresh session. `mcp_kuri_restart()`
+
+### 2. Observation (Seeing the Page)
+- **Snapshot**: Get the compact accessibility tree. **Primary tool for finding elements.** `mcp_kuri_snapshot()` -> Result: `[Link] "Login" @e4`
+- **Screenshot**: Visual capture. Use for CAPTCHAs or layout verification. ◦ `mcp_kuri_screenshot(crop={x, y, w, h})`
+- **Read**: Extract full text or markdown. `mcp_kuri_read(format="markdown")`
+
+### 3. Interaction (Acting on Elements)
+- **Click**: Click an element. `mcp_kuri_click(ref="@e4")`
+- **Type**: Type into an input. `mcp_kuri_type(ref="@e5", text="hello")`
+- **Hover**: Hover over an element. `mcp_kuri_hover(ref="@e6")`
+- **Press**: Press a key. `mcp_kuri_press(key="Enter")`
+- **Scroll**: Scroll the page. `mcp_kuri_scroll(direction="down")`
+
+### 4. Advanced Interaction & Management
+- **Evaluate**: Run JavaScript. `mcp_kuri_evaluate(script="window.scrollTo(0, 0)")`
+- **List Tabs**: Show all open tabs. `mcp_kuri_list_tabs()`
+- **Close Tab**: Close a tab. `mcp_kuri_close_tab(tab_id="...")`
 
 ## Presets Library
 
@@ -39,4 +49,7 @@ Use these presets in `mcp_kuri_configure` to quickly change the browser's identi
 
 - **Volatility**: `@eN` references change whenever the page content updates. Always take a new `mcp_kuri_snapshot` after clicking or navigating.
 - **Wait for Load**: `mcp_kuri_navigate` waits for the page to be interactive, but some dynamic content may take longer. If you don't see what you expect, take another snapshot after a brief pause.
-- **Token Economy**: Prefer `mcp_kuri_snapshot` over reading the full page content (`mcp_kuri_read`) unless you need to summarize or extract large amounts of text.
+- **Token Economy**: Prefer `mcp_kuri_snapshot` over reading the full page content (`mcp_kuri_read`) or taking screenshots (`mcp_kuri_screenshot`) unless you need to summarize large amounts of text or perform visual analysis.
+- **Visual Analysis**: Use `mcp_kuri_screenshot` when you need to solve puzzles (like CAPTCHAs), verify layouts, or understand non-textual elements. Prefer element-level cropping (by providing a `ref`) to save tokens and improve model focus.
+- **File Saving**: Use the `path` parameter to save evidence directly to the workspace. Set `return_image: false` to save tokens if you only need to save the file and don't need to analyze the image yourself.
+- **Cropping**: Use the `crop` parameter to isolate regions of interest. This is highly effective for visual tasks like CAPTCHA solving. If element-level cropping (`ref`) fails or returns the full page, use `crop` with coordinates instead.

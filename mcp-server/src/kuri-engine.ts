@@ -1,6 +1,9 @@
 import { spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import net from "net";
+import fs from "node:fs";
+import { dirname, join } from "node:path";
+import { inflateSync, deflateSync, crc32 } from "node:zlib";
 
 interface Preset {
   userAgent: string;
@@ -117,7 +120,13 @@ export class KuriEngine extends EventEmitter {
 
     this.port = await this.getFreePort();
     console.error(`Starting Kuri process: ${this.kuriPath} on port ${this.port}`);
-    const env = { ...process.env, PORT: this.port.toString(), HEADLESS: this.currentConfig.headless.toString() };
+    const env = { 
+      ...process.env, 
+      PORT: this.port.toString(), 
+      HEADLESS: this.currentConfig.headless.toString(),
+      REQUEST_TIMEOUT_MS: "60000",
+      NAVIGATE_TIMEOUT_MS: "60000"
+    };
     if (this.currentConfig.proxy) {
       (env as any).KURI_PROXY = this.currentConfig.proxy;
     }
@@ -187,7 +196,7 @@ export class KuriEngine extends EventEmitter {
     }
 
     if (needsRestart) {
-      this.restart();
+      await this.restart();
       await this.ensureRunning();
     }
 
@@ -218,13 +227,22 @@ export class KuriEngine extends EventEmitter {
     };
   }
 
-  async navigate(url: string) {
-    // 1. Ensure we have a tab
+  private async ensureTab() {
     if (!this.currentTabId) {
-      const resTab = await this.request("/tab/new");
-      const dataTab = await resTab.json() as any;
-      this.currentTabId = dataTab.tab_id;
+      const resTabs = await this.request("/tabs");
+      const tabs = await resTabs.json() as any[];
+      if (tabs.length > 0) {
+        this.currentTabId = tabs[0].id;
+      } else {
+        const resTab = await this.request("/tab/new");
+        const dataTab = await resTab.json() as any;
+        this.currentTabId = dataTab.tab_id;
+      }
     }
+  }
+
+  async navigate(url: string) {
+    await this.ensureTab();
 
     // 2. Navigate the tab
     const res = await this.request(`/navigate?url=${encodeURIComponent(url)}`);
@@ -241,6 +259,7 @@ export class KuriEngine extends EventEmitter {
   }
 
   async snapshot(filter: "interactive" | "all" = "interactive") {
+    await this.ensureTab();
     const res = await this.request(`/snapshot?filter=${filter}&format=compact`);
     const text = await res.text();
     return {
@@ -254,6 +273,7 @@ export class KuriEngine extends EventEmitter {
   }
 
   async click(ref: string) {
+    await this.ensureTab();
     const elementRef = ref.startsWith("@") ? ref.substring(1) : ref;
     await this.request(`/action?action=click&ref=${elementRef}`);
     return {
@@ -267,6 +287,7 @@ export class KuriEngine extends EventEmitter {
   }
 
   async type(ref: string, text: string) {
+    await this.ensureTab();
     const elementRef = ref.startsWith("@") ? ref.substring(1) : ref;
     await this.request(`/action?action=fill&ref=${elementRef}&value=${encodeURIComponent(text)}`);
     return {
@@ -279,18 +300,233 @@ export class KuriEngine extends EventEmitter {
     };
   }
 
-  async read(format: "markdown" | "text" = "markdown") {
-    const endpoint = format === "markdown" ? "/markdown" : "/text";
-    const res = await this.request(endpoint);
-    const text = await res.text();
+  async scroll(direction: "up" | "down") {
+    await this.ensureTab();
+    await this.request(`/action?action=scroll&direction=${direction}`);
     return {
       content: [
         {
           type: "text",
-          text,
+          text: `Scrolled ${direction}`,
         },
       ],
     };
+  }
+  async hover(ref: string) {
+    await this.ensureTab();
+    const elementRef = ref.startsWith("@") ? ref.substring(1) : ref;
+    await this.request(`/action?action=hover&ref=${elementRef}`);
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Hovered over ${ref}`,
+        },
+      ],
+    };
+  }
+  async press(key: string) {
+    await this.ensureTab();
+    await this.request(`/action?action=press&value=${encodeURIComponent(key)}`);
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Pressed key: ${key}`,
+        },
+      ],
+    };
+  }
+  async evaluate(script: string) {
+    await this.ensureTab();
+    const res = await this.request(`/evaluate?expression=${encodeURIComponent(script)}`);
+    const data = await res.json() as any;
+    // CDP format: { result: { result: { value: ... } } }
+    const value = data.result?.result?.value ?? data.result?.value ?? data.value ?? data;
+    return {
+      content: [
+        {
+          type: "text",
+          text: typeof value === "string" ? value : JSON.stringify(value, null, 2),
+        },
+      ],
+    };
+  }
+  async listTabs() {
+    const res = await this.request("/tabs");
+    const tabs = await res.json() as any[];
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(tabs, null, 2),
+        },
+      ],
+    };
+  }
+  async closeTab(tabId?: string) {
+    const targetId = tabId || this.currentTabId;
+    if (!targetId) throw new Error("No tab ID provided and no current tab set.");
+    await this.request(`/tab/close?tab_id=${targetId}`);
+    if (targetId === this.currentTabId) this.currentTabId = null;
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Closed tab: ${targetId}`,
+        },
+      ],
+    };
+  }
+  async wait(delayMs: number) {
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Waited for ${delayMs}ms`,
+        },
+      ],
+    };
+  }
+
+  async read(format: "markdown" | "text" = "markdown") {
+    await this.ensureTab();
+    const endpoint = format === "markdown" ? "/markdown" : "/text";
+    const res = await this.request(endpoint);
+    const text = await res.text();
+
+    try {
+      const data = JSON.parse(text);
+      // Extract from CDP format: { result: { result: { value: "..." } } }
+      const extracted = data.result?.result?.value ?? data.result?.value ?? data.value ?? text;
+      return {
+        content: [
+          {
+            type: "text",
+            text: typeof extracted === "string" ? extracted : JSON.stringify(extracted),
+          },
+        ],
+      };
+    } catch (e) {
+      // Not JSON, return as is
+      return {
+        content: [
+          {
+            type: "text",
+            text,
+          },
+        ],
+      };
+    }
+  }
+  private async cropImage(buffer: Buffer, rect: { x: number; y: number; width: number; height: number }): Promise<string> {
+    if (buffer.slice(0, 8).toString("hex") !== "89504e470d0a1a0a") {
+      throw new Error("Invalid PNG signature");
+    }
+
+    let offset = 8;
+    let width = 0, height = 0, colorType = 0;
+    const idats: Buffer[] = [];
+
+    while (offset < buffer.length) {
+      const length = buffer.readUInt32BE(offset);
+      const type = buffer.slice(offset + 4, offset + 8).toString("ascii");
+      const data = buffer.slice(offset + 8, offset + 8 + length);
+      if (type === "IHDR") {
+        width = data.readUInt32BE(0);
+        height = data.readUInt32BE(4);
+        colorType = data[9];
+      } else if (type === "IDAT") {
+        idats.push(data);
+      } else if (type === "IEND") break;
+      offset += length + 12;
+    }
+
+    const bpp = colorType === 6 ? 4 : 3;
+    const rawData = inflateSync(Buffer.concat(idats));
+    const rowSize = 1 + width * bpp;
+    const unfiltered = Buffer.alloc(width * height * bpp);
+    for (let y = 0; y < height; y++) {
+      const rowStart = y * rowSize;
+      const filterType = rawData[rowStart];
+      for (let x = 0; x < width * bpp; x++) {
+        const left = x >= bpp ? unfiltered[y * width * bpp + x - bpp] : 0;
+        const up = y > 0 ? unfiltered[(y - 1) * width * bpp + x] : 0;
+        const upLeft = (x >= bpp && y > 0) ? unfiltered[(y - 1) * width * bpp + x - bpp] : 0;
+        let val = rawData[rowStart + 1 + x];
+        if (filterType === 1) val = (val + left) & 0xFF;
+        else if (filterType === 2) val = (val + up) & 0xFF;
+        else if (filterType === 3) val = (val + Math.floor((left + up) / 2)) & 0xFF;
+        else if (filterType === 4) {
+          const p = left + up - upLeft;
+          const pa = Math.abs(p - left), pb = Math.abs(p - up), pc = Math.abs(p - upLeft);
+          val = (val + (pa <= pb && pa <= pc ? left : (pb <= pc ? up : upLeft))) & 0xFF;
+        }
+        unfiltered[y * width * bpp + x] = val;
+      }
+    }
+
+    const targetX = Math.max(0, Math.min(rect.x, width)), targetY = Math.max(0, Math.min(rect.y, height));
+    const targetW = Math.min(rect.width, width - targetX), targetH = Math.min(rect.height, height - targetY);
+    const croppedRaw = Buffer.alloc(targetH * (1 + targetW * bpp));
+    for (let y = 0; y < targetH; y++) {
+      const dstOffset = y * (1 + targetW * bpp);
+      croppedRaw[dstOffset] = 0;
+      unfiltered.copy(croppedRaw, dstOffset + 1, ((targetY + y) * width + targetX) * bpp, ((targetY + y) * width + targetX + targetW) * bpp);
+    }
+
+    const writeChunk = (type: string, data: Buffer) => {
+      const b = Buffer.alloc(8 + data.length + 4);
+      b.writeUInt32BE(data.length, 0); b.write(type, 4); data.copy(b, 8);
+      const c = Buffer.alloc(4 + data.length); c.write(type, 0); data.copy(c, 4);
+      b.writeUInt32BE(crc32(c), 8 + data.length); return b;
+    };
+    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(targetW, 0); ihdr.writeUInt32BE(targetH, 4); ihdr[8] = 8; ihdr[9] = colorType;
+    return Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), writeChunk("IHDR", ihdr), writeChunk("IDAT", deflateSync(croppedRaw)), writeChunk("IEND", Buffer.alloc(0))]).toString("base64");
+  }
+
+  async screenshotImage(ref?: string, path?: string, returnImage: boolean = true, crop?: { x: number; y: number; width: number; height: number }) {
+    await this.ensureTab();
+    const elementRef = ref ? (ref.startsWith("@") ? ref.substring(1) : ref) : null;
+    const endpoint = elementRef ? `/screenshot?ref=${elementRef}` : "/screenshot";
+    const res = await this.request(endpoint);
+    const data = await res.json() as any;
+
+    // Kuri returns { id: N, result: { data: "base64..." } }
+    let base64 = data.result?.data || data.data;
+    if (!base64) {
+      throw new Error(`Kuri screenshot failed: ${JSON.stringify(data)}`);
+    }
+
+    // Apply cropping if requested
+    if (crop) {
+      base64 = await this.cropImage(Buffer.from(base64, "base64"), crop);
+    }
+
+    if (path) {
+      const dirPath = dirname(path);
+      if (dirPath && dirPath !== "." && !fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+      fs.writeFileSync(path, Buffer.from(base64, "base64"));
+    }
+
+    const content: any[] = [];
+    if (returnImage) {
+      content.push({
+        type: "image",
+        data: base64,
+        mimeType: "image/png",
+      });
+    } else if (path) {
+      content.push({
+        type: "text",
+        text: `Screenshot saved to ${path}`,
+      });
+    }
+
+    return { content };
   }
 
   async restart() {

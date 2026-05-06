@@ -68,6 +68,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "scroll",
+        description: "Scroll the page up or down.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            direction: { type: "string", enum: ["up", "down"] },
+          },
+          required: ["direction"],
+        },
+      },
+      {
+        name: "hover",
+        description: "Hover over an element by its @eN reference.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            ref: { type: "string" },
+          },
+          required: ["ref"],
+        },
+      },
+      {
         name: "click",
         description: "Click an element by its @eN reference.",
         inputSchema: {
@@ -79,15 +101,51 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
-        name: "type",
-        description: "Type text into an input element by its @eN reference.",
+        name: "press",
+        description: "Press a keyboard key (e.g., 'Enter', 'Escape', 'ArrowDown').",
         inputSchema: {
           type: "object",
           properties: {
-            ref: { type: "string" },
-            text: { type: "string" },
+            key: { type: "string" },
           },
-          required: ["ref", "text"],
+          required: ["key"],
+        },
+      },
+      {
+        name: "evaluate",
+        description: "Execute arbitrary JavaScript in the browser context.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            script: { type: "string" },
+          },
+          required: ["script"],
+        },
+      },
+      {
+        name: "list_tabs",
+        description: "List all currently open tabs.",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "close_tab",
+        description: "Close a specific tab by ID, or the current tab if ID is omitted.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            tab_id: { type: "string" },
+          },
+        },
+      },
+      {
+        name: "wait",
+        description: "Wait for a specified amount of time (server-side delay).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            delay_ms: { type: "number", description: "Delay in milliseconds." },
+          },
+          required: ["delay_ms"],
         },
       },
       {
@@ -97,6 +155,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             format: { type: "string", enum: ["markdown", "text"] },
+          },
+        },
+      },
+      {
+        name: "screenshot",
+        description: "Take a PNG screenshot of the viewport or a specific element.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            ref: { type: "string", description: "Optional @eN reference to crop the screenshot to a specific element." },
+            path: { type: "string", description: "Optional workspace path to save the PNG file (e.g., 'tmp/evidence.png')." },
+            return_image: { type: "boolean", description: "Whether to return the image to the LLM context. Defaults to true." },
+            crop: {
+              type: "object",
+              properties: {
+                x: { type: "number" },
+                y: { type: "number" },
+                width: { type: "number" },
+                height: { type: "number" },
+              },
+              required: ["x", "y", "width", "height"],
+              description: "Optional region to crop from the screenshot.",
+            },
           },
         },
       },
@@ -126,12 +207,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return await engine.navigate((args as any).url);
       case "snapshot":
         return await engine.snapshot((args as any).filter);
-      case "click":
-        return await engine.click((args as any).ref);
-      case "type":
-        return await engine.type((args as any).ref, (args as any).text);
+      case "scroll":
+        return await engine.scroll((args as any).direction);
+      case "hover":
+        return await engine.hover((args as any).ref);
+      case "press":
+        return await engine.press((args as any).key);
+      case "evaluate":
+        return await engine.evaluate((args as any).script);
+      case "list_tabs":
+        return await engine.listTabs();
+      case "close_tab":
+        return await engine.closeTab((args as any).tab_id);
       case "read":
         return await engine.read((args as any).format);
+      case "screenshot":
+        return await engine.screenshotImage((args as any).ref, (args as any).path, (args as any).return_image, (args as any).crop);
+      case "wait":
+        return await engine.wait((args as any).delay_ms);
       case "restart":
         return await engine.restart();
       default:
