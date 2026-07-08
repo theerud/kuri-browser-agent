@@ -1,7 +1,7 @@
 {
   "name": "kuri-browser-agent",
   "displayName": "Kuri Browser Agent",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Lightweight, token-efficient browser automation powered by the Kuri engine, exposed to Claude Code over MCP.",
   "author": {
     "name": "theerud"

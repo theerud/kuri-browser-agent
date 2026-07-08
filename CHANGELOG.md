@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-07-08
+
+### Added
+- `ui-reviewer` subagent for the Claude Code plugin: visual QA across viewport presets with a structured findings report. Preloads the `kuri` skill for browser mechanics.
+
+### Fixed
+- `configure` now applies the preset's viewport, device-pixel-ratio, and user agent via kuri's `/emulate` endpoint — previously it computed these but never sent them, so presets were a no-op. Mobile presets carry accurate device-pixel-ratios.
+
 ## [0.3.0] - 2026-07-08
 
 ### Added
