@@ -24,7 +24,7 @@
   "mcpServers": {
     "kuri": {
       "command": "node",
-      "args": ["/home/tlt/src/tltsrc/gemini-cli-expr/kuri-browser-agent/mcp-server/dist/index.js"]
+      "args": ["/home/tlt/src/tltsrc/gemini-cli-expr/kuri-browser-agent/claude-code/mcp-server/dist/index.js"]
     }
   }
 }

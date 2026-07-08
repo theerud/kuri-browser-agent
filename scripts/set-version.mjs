@@ -13,7 +13,7 @@ if (!spec) {
   process.exit(1);
 }
 
-const sourceOfTruth = join(root, "mcp-server/package.json");
+const sourceOfTruth = join(root, "claude-code/mcp-server/package.json");
 const current = JSON.parse(readFileSync(sourceOfTruth, "utf8")).version;
 
 function nextVersion(cur, s) {
@@ -42,7 +42,7 @@ function bumpManifest(rel) {
 }
 
 const files = [
-  "mcp-server/package.json",
+  "claude-code/mcp-server/package.json",
   "gemini-extension.json",
   "claude-code/.claude-plugin/plugin.json",
 ];
@@ -50,11 +50,11 @@ for (const rel of files) bumpManifest(rel);
 
 // Lockfile is already canonical JSON with many nested version keys; touch only
 // the two project-level ones via a structured edit.
-const lockPath = join(root, "mcp-server/package-lock.json");
+const lockPath = join(root, "claude-code/mcp-server/package-lock.json");
 const lock = JSON.parse(readFileSync(lockPath, "utf8"));
 lock.version = next;
 if (lock.packages && lock.packages[""]) lock.packages[""].version = next;
 writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n");
 
 console.log(`${current} -> ${next}`);
-console.log(`Updated: ${files.join(", ")}, mcp-server/package-lock.json`);
+console.log(`Updated: ${files.join(", ")}, claude-code/mcp-server/package-lock.json`);
