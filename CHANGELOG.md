@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-07-08
+
+### Added
+- Claude Code plugin (`claude-code/`) exposing the Kuri browser agent as a subagent and skill, with a marketplace manifest for installation.
+
+### Fixed
+- Send the bearer token now required by the Kuri 0.4.1 HTTP API, resolving 401 errors on browser actions.
+
+### Changed
+- Add a shared `scripts/set-version.mjs` that bumps the version across all release artifacts in one step.
+
 ## [0.2.0] - 2026-05-07
 
 ### Added
