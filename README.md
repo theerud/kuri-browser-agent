@@ -1,4 +1,4 @@
-# Kuri Browser Agent for Gemini CLI
+# Kuri Browser Agent
 
 A lightweight, token-efficient browser automation extension powered by the [Kuri](https://kuri.trilok.ai/) engine and the Model Context Protocol (MCP). It ships for both **Gemini CLI** (as an extension) and **Claude Code** (as a plugin), sharing the same MCP server.
 
@@ -24,7 +24,7 @@ A lightweight, token-efficient browser automation extension powered by the [Kuri
 1. Clone or download this repository.
 2. Build the MCP server:
    ```bash
-   cd mcp-server && npm install && npm run build
+   cd claude-code/mcp-server && npm install && npm run build
    ```
 3. Link the extension to Gemini CLI:
    ```bash
@@ -43,37 +43,44 @@ The agent will use the `mcp_kuri_` tools to navigate, snapshot, and extract cont
 
 ## Claude Code
 
-The same browser agent is available to Claude Code as a plugin under [`claude-code/`](claude-code/). It reuses the shared `mcp-server/`, so the only build step is the same one as above.
+The browser agent ships as a Claude Code plugin under [`claude-code/`](claude-code/), bundling the MCP server, two subagents (`kuri-agent`, `ui-reviewer`), the `kuri` skill, and a `/kuri-setup` command.
 
-### Installation
+### Install from GitHub
 
-1. Build the MCP server (if you haven't already):
-   ```bash
-   cd mcp-server && npm install && npm run build
+1. Add the marketplace and install the plugin:
    ```
-2. Load the plugin from the repo root. For local use, point Claude Code at the plugin directory:
-   ```bash
-   claude --plugin-dir ./claude-code
+   /plugin marketplace add theerud/kuri-browser-agent
+   /plugin install kuri-browser-agent@kuri-browser-agent
    ```
-   Or add the bundled marketplace and install it:
-   ```bash
-   claude plugin marketplace add .
-   claude plugin install kuri-browser-agent
+2. Initialize it. The plugin's MCP server is TypeScript that must be built once, and the kuri engine must be present:
    ```
+   /kuri-setup
+   ```
+   This checks for the `kuri` binary (offering to install it) and builds the bundled MCP server. It asks before running anything.
+3. Reload the plugin so Claude Code launches the MCP server: run `/reload-plugins` (or restart the session). `/mcp` won't list `kuri` until then — the server failed to launch at startup, before the build existed.
 
-> The plugin resolves the MCP server via `${CLAUDE_PLUGIN_ROOT}/../mcp-server/dist/index.js`, so the built `mcp-server/` must sit next to the `claude-code/` plugin directory (as it does in this repo).
+After that, the `kuri` skill and the `kuri-agent` / `ui-reviewer` subagents activate automatically for browser tasks.
+
+### Local development
+
+Point Claude Code at the plugin directory in a built clone:
+```bash
+cd claude-code/mcp-server && npm install && npm run build   # build once
+claude --plugin-dir ./claude-code
+```
 
 ### Usage
-
-The `kuri` skill and `kuri-agent` subagent activate automatically for web tasks. For example:
 
 ```text
 Use the kuri browser to summarize the top 3 stories on https://news.ycombinator.com
 ```
+```text
+Have the ui-reviewer check http://localhost:3000 across desktop and mobile and report layout issues
+```
 
-Claude exposes the same tools under the `mcp__kuri__*` namespace (e.g. `mcp__kuri__navigate`, `mcp__kuri__snapshot`).
+Claude exposes the tools under the `mcp__kuri__*` namespace (e.g. `mcp__kuri__navigate`, `mcp__kuri__snapshot`).
 
-> **Note**: The subagent uses the `sonnet` model for a balance of speed, capability, and cost. Adjust `model` in `claude-code/agents/kuri_agent.md` (e.g. to `haiku` for lighter/cheaper runs or `opus` for the hardest tasks).
+> **Note**: Both subagents use the `sonnet` model. Adjust `model` in `claude-code/agents/*.md` (e.g. `haiku` for lighter/cheaper runs, `opus` for the hardest tasks).
 
 ## Available MCP Tools
 
@@ -91,12 +98,14 @@ Claude exposes the same tools under the `mcp__kuri__*` namespace (e.g. `mcp__kur
 
 ## Architecture
 
-- **`agents/kuri_agent.md`**: Defines the subagent persona and tool usage mandates.
-- **`skills/kuri/SKILL.md`**: Strategic guide for the agent on how to browse efficiently.
-- **`mcp-server/`**: The Node.js implementation of the MCP bridge.
+- **`agents/kuri_agent.md`**, **`skills/kuri/SKILL.md`**: Gemini CLI subagent persona and browsing guide.
 - **`gemini-extension.json`**: Gemini CLI extension configuration and tool registration.
-- **`claude-code/`**: Claude Code plugin (mirrors the agent and skill; reuses the shared `mcp-server/`).
-- **`.claude-plugin/marketplace.json`**: Marketplace manifest for installing the Claude Code plugin.
+- **`claude-code/`**: The Claude Code plugin.
+  - **`mcp-server/`**: The Node.js MCP bridge (bundled in the plugin; shared with the Gemini extension).
+  - **`agents/`**: `kuri_agent` (general web automation) and `ui-reviewer` (visual QA).
+  - **`skills/kuri/`**: Browsing guide, preloaded by `ui-reviewer`.
+  - **`commands/kuri-setup.md`**: First-time initialization (build server, check for kuri).
+- **`.claude-plugin/marketplace.json`**: Marketplace manifest for installing the Claude Code plugin from GitHub.
 
 ## License
 
