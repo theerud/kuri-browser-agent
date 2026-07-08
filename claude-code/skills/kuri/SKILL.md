@@ -7,6 +7,11 @@ description: Browser automation using the Kuri engine. Use when you need to navi
 
 This skill covers the use of the Kuri browser automation engine. Kuri is a token-efficient browser that provides a compact accessibility tree to help you navigate and interact with web pages.
 
+## Preflight
+Before using the browser tools, confirm the `mcp__kuri__*` tools are actually available. If they are missing, the plugin is not initialized yet:
+- In a normal session: offer to run `/kuri-setup` — it checks for the kuri binary and builds the MCP server — then reload the plugin (`/reload-plugins`, or restart the session) so the tools load. Note `/mcp` will not list `kuri` until then.
+- If you are running as a subagent: you cannot initialize the plugin or reconnect MCP from here. Stop and report that the caller must run `/kuri-setup` in the main session.
+
 ## Core Interaction Loop
 
 Use the available `mcp__kuri__*` tools to interact with the browser:
