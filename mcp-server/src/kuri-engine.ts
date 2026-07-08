@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
+import { randomBytes } from "node:crypto";
 import net from "net";
 import fs from "node:fs";
 import { dirname, join } from "node:path";
@@ -50,6 +51,7 @@ export class KuriEngine extends EventEmitter {
   private get baseUrl(): string { return `http://127.0.0.1:${this.port}`; }
   private sessionId: string = `mcp-session-${Math.random().toString(36).substring(7)}`;
   private kuriPath: string = "kuri";
+  private apiToken: string = process.env.KURI_API_TOKEN || randomBytes(24).toString("hex");
   private currentTabId: string | null = null;
   private currentConfig: any = {
     headless: true,
@@ -120,10 +122,11 @@ export class KuriEngine extends EventEmitter {
 
     this.port = await this.getFreePort();
     console.error(`Starting Kuri process: ${this.kuriPath} on port ${this.port}`);
-    const env = { 
-      ...process.env, 
-      PORT: this.port.toString(), 
+    const env = {
+      ...process.env,
+      PORT: this.port.toString(),
       HEADLESS: this.currentConfig.headless.toString(),
+      KURI_API_TOKEN: this.apiToken,
       REQUEST_TIMEOUT_MS: "60000",
       NAVIGATE_TIMEOUT_MS: "60000"
     };
@@ -171,6 +174,7 @@ export class KuriEngine extends EventEmitter {
       headers: {
         ...options.headers,
         "X-Kuri-Session": this.sessionId,
+        "Authorization": `Bearer ${this.apiToken}`,
       },
     });
 
