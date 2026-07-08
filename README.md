@@ -1,6 +1,6 @@
 # Kuri Browser Agent for Gemini CLI
 
-A lightweight, token-efficient browser automation extension for Gemini CLI, powered by the [Kuri](https://kuri.trilok.ai/) engine and the Model Context Protocol (MCP).
+A lightweight, token-efficient browser automation extension powered by the [Kuri](https://kuri.trilok.ai/) engine and the Model Context Protocol (MCP). It ships for both **Gemini CLI** (as an extension) and **Claude Code** (as a plugin), sharing the same MCP server.
 
 ## Features
 
@@ -41,6 +41,40 @@ Invoke the Kuri agent directly in your chat:
 
 The agent will use the `mcp_kuri_` tools to navigate, snapshot, and extract content without manual shell command prompts.
 
+## Claude Code
+
+The same browser agent is available to Claude Code as a plugin under [`claude-code/`](claude-code/). It reuses the shared `mcp-server/`, so the only build step is the same one as above.
+
+### Installation
+
+1. Build the MCP server (if you haven't already):
+   ```bash
+   cd mcp-server && npm install && npm run build
+   ```
+2. Load the plugin from the repo root. For local use, point Claude Code at the plugin directory:
+   ```bash
+   claude --plugin-dir ./claude-code
+   ```
+   Or add the bundled marketplace and install it:
+   ```bash
+   claude plugin marketplace add .
+   claude plugin install kuri-browser-agent
+   ```
+
+> The plugin resolves the MCP server via `${CLAUDE_PLUGIN_ROOT}/../mcp-server/dist/index.js`, so the built `mcp-server/` must sit next to the `claude-code/` plugin directory (as it does in this repo).
+
+### Usage
+
+The `kuri` skill and `kuri-agent` subagent activate automatically for web tasks. For example:
+
+```text
+Use the kuri browser to summarize the top 3 stories on https://news.ycombinator.com
+```
+
+Claude exposes the same tools under the `mcp__kuri__*` namespace (e.g. `mcp__kuri__navigate`, `mcp__kuri__snapshot`).
+
+> **Note**: The subagent uses the `sonnet` model for a balance of speed, capability, and cost. Adjust `model` in `claude-code/agents/kuri_agent.md` (e.g. to `haiku` for lighter/cheaper runs or `opus` for the hardest tasks).
+
 ## Available MCP Tools
 
 - `mcp_kuri_navigate`: Go to a URL.
@@ -60,7 +94,9 @@ The agent will use the `mcp_kuri_` tools to navigate, snapshot, and extract cont
 - **`agents/kuri_agent.md`**: Defines the subagent persona and tool usage mandates.
 - **`skills/kuri/SKILL.md`**: Strategic guide for the agent on how to browse efficiently.
 - **`mcp-server/`**: The Node.js implementation of the MCP bridge.
-- **`gemini-extension.json`**: Extension configuration and tool registration.
+- **`gemini-extension.json`**: Gemini CLI extension configuration and tool registration.
+- **`claude-code/`**: Claude Code plugin (mirrors the agent and skill; reuses the shared `mcp-server/`).
+- **`.claude-plugin/marketplace.json`**: Marketplace manifest for installing the Claude Code plugin.
 
 ## License
 

@@ -1,0 +1,14 @@
+{
+  "name": "kuri-browser-agent",
+  "owner": {
+    "name": "theerud"
+  },
+  "description": "Kuri Browser Agent — lightweight, token-efficient browser automation for Claude Code.",
+  "plugins": [
+    {
+      "name": "kuri-browser-agent",
+      "source": "./claude-code",
+      "description": "Lightweight, token-efficient browser automation powered by the Kuri engine."
+    }
+  ]
+}

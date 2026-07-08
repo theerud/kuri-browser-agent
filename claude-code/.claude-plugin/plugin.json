@@ -1,0 +1,17 @@
+{
+  "name": "kuri-browser-agent",
+  "displayName": "Kuri Browser Agent",
+  "version": "0.2.0",
+  "description": "Lightweight, token-efficient browser automation powered by the Kuri engine, exposed to Claude Code over MCP.",
+  "author": {
+    "name": "theerud"
+  },
+  "license": "MIT",
+  "keywords": ["browser", "automation", "mcp", "kuri", "web-scraping", "agent"],
+  "mcpServers": {
+    "kuri": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/../mcp-server/dist/index.js"]
+    }
+  }
+}
