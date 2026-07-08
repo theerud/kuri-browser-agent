@@ -10,6 +10,8 @@ interface Preset {
   userAgent: string;
   width: number;
   height: number;
+  mobile?: boolean;
+  deviceScaleFactor?: number;
 }
 
 const PRESETS: Record<string, Preset> = {
@@ -27,16 +29,22 @@ const PRESETS: Record<string, Preset> = {
     userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
     width: 393,
     height: 852,
+    mobile: true,
+    deviceScaleFactor: 3,
   },
   pixel_8: {
     userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
     width: 412,
     height: 915,
+    mobile: true,
+    deviceScaleFactor: 2.625,
   },
   tablet_ipad: {
     userAgent: "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
     width: 810,
     height: 1080,
+    mobile: true,
+    deviceScaleFactor: 2,
   },
   bot_google: {
     userAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
@@ -207,12 +215,28 @@ export class KuriEngine extends EventEmitter {
     let effectiveUA = args.userAgent;
     let effectiveWidth = args.width;
     let effectiveHeight = args.height;
+    let effectiveMobile: boolean | undefined;
+    let effectiveScale: number | undefined;
 
     if (args.preset && PRESETS[args.preset]) {
       const p = PRESETS[args.preset];
       effectiveUA = effectiveUA || p.userAgent;
       effectiveWidth = effectiveWidth || p.width;
       effectiveHeight = effectiveHeight || p.height;
+      effectiveMobile = p.mobile;
+      effectiveScale = p.deviceScaleFactor;
+    }
+
+    if (effectiveWidth && effectiveHeight) {
+      await this.ensureTab();
+      const params = new URLSearchParams({
+        width: String(effectiveWidth),
+        height: String(effectiveHeight),
+      });
+      if (effectiveUA) params.set("userAgent", effectiveUA);
+      if (effectiveMobile !== undefined) params.set("mobile", String(effectiveMobile));
+      if (effectiveScale !== undefined) params.set("scale", String(effectiveScale));
+      await this.request(`/emulate?${params.toString()}`);
     }
 
     return {
@@ -223,6 +247,8 @@ export class KuriEngine extends EventEmitter {
             preset: args.preset,
             userAgent: effectiveUA,
             viewport: effectiveWidth ? `${effectiveWidth}x${effectiveHeight}` : "default",
+            mobile: effectiveMobile,
+            deviceScaleFactor: effectiveScale,
             proxy: this.currentConfig.proxy,
             headless: this.currentConfig.headless
           })}`,
