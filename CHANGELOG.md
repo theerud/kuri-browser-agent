@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-07-08
+
+### Added
+- `/kuri-setup` command that checks for the kuri binary and builds the bundled MCP server on approval, so the Claude Code plugin can be installed from a GitHub marketplace without a manual clone-and-build. Preflight guidance in the `kuri` skill and `kuri_agent` routes to it when the tools are unavailable.
+
+### Changed
+- The MCP server now lives inside the plugin (`claude-code/mcp-server/`) so it ships self-contained and survives a marketplace/git install.
+- README documents the GitHub install flow (`/plugin marketplace add` → `/kuri-setup` → `/reload-plugins`).
+
 ## [0.4.0] - 2026-07-08
 
 ### Added
