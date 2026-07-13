@@ -38,6 +38,8 @@ Use the available `mcp__kuri__*` tools to interact with the browser:
 ### 4. Advanced Interaction & Management
 - **Evaluate**: Run JavaScript. `mcp__kuri__evaluate(script="window.scrollTo(0, 0)")`
 - **List Tabs**: Show all open tabs. `mcp__kuri__list_tabs()`
+- **New Tab**: Create and select a tab. `mcp__kuri__new_tab()`
+- **Select Tab**: Select an existing tab. `mcp__kuri__select_tab(tab_id="...")`
 - **Close Tab**: Close a tab. `mcp__kuri__close_tab(tab_id="...")`
 
 ## Presets Library
@@ -54,6 +56,7 @@ Use these presets in `mcp__kuri__configure` to quickly change the browser's iden
 ## Best Practices
 
 - **Volatility**: `@eN` references change whenever the page content updates. Always take a new `mcp__kuri__snapshot` after clicking or navigating.
+- **Parallel Tasks**: Create one tab per task and pass its `tab_id` on every browser action. The selected tab is only a convenience default and is shared by concurrent callers.
 - **Wait for Load**: `mcp__kuri__navigate` waits for the page to be interactive, but some dynamic content may take longer. If you don't see what you expect, take another snapshot after a brief pause.
 - **Token Economy**: Prefer `mcp__kuri__snapshot` over reading the full page content (`mcp__kuri__read`) or taking screenshots (`mcp__kuri__screenshot`) unless you need to summarize large amounts of text or perform visual analysis.
 - **Visual Analysis**: Use `mcp__kuri__screenshot` when you need to solve puzzles (like CAPTCHAs), verify layouts, or understand non-textual elements. Prefer coordinate cropping to save tokens and improve model focus.

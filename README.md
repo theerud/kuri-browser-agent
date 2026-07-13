@@ -94,7 +94,9 @@ Claude exposes the tools under the `mcp__kuri__*` namespace (e.g. `mcp__kuri__na
 - `mcp_kuri_configure`: Set device presets, proxies, or user agents.
 - `mcp_kuri_wait`: Server-side delay for timing-sensitive tasks.
 - `mcp_kuri_restart`: Restart the browser for a fresh session.
-- `mcp_kuri_list_tabs` / `mcp_kuri_close_tab`: Manage multiple browser tabs.
+- `mcp_kuri_new_tab` / `mcp_kuri_select_tab` / `mcp_kuri_list_tabs` / `mcp_kuri_close_tab`: Manage multiple browser tabs.
+
+Browser actions accept an optional `tab_id`. Parallel agents should create separate tabs and pass their tab IDs explicitly so they do not change each other's active page.
 
 ## Architecture
 

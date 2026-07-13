@@ -6,6 +6,14 @@ import fs from "node:fs";
 import { dirname, join } from "node:path";
 import { inflateSync, deflateSync, crc32 } from "node:zlib";
 
+export interface KuriEngineOptions {
+  baseUrl?: string;
+  fetch?: typeof fetch;
+  getFreePort?: () => Promise<number>;
+  installSignalHandlers?: boolean;
+  spawn?: typeof spawn;
+}
+
 interface Preset {
   userAgent: string;
   width: number;
@@ -68,6 +76,7 @@ const PRESETS: Record<string, Preset> = {
 
 export class KuriEngine extends EventEmitter {
   private kuriProcess: ChildProcess | null = null;
+  private startPromise: Promise<void> | null = null;
   private port: number = 8080;
   private get baseUrl(): string { return this.baseUrlOverride || `http://127.0.0.1:${this.port}`; }
   private sessionId: string = `mcp-session-${Math.random().toString(36).substring(7)}`;
@@ -80,11 +89,15 @@ export class KuriEngine extends EventEmitter {
   };
   private readonly baseUrlOverride?: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly getFreePortImpl?: () => Promise<number>;
+  private readonly spawnImpl: KuriEngineOptions["spawn"];
 
-  constructor(options: { baseUrl?: string; fetch?: typeof fetch; installSignalHandlers?: boolean } = {}) {
+  constructor(options: KuriEngineOptions = {}) {
     super();
     this.baseUrlOverride = options.baseUrl;
     this.fetchImpl = options.fetch || fetch;
+    this.getFreePortImpl = options.getFreePort;
+    this.spawnImpl = options.spawn || spawn;
     if (options.installSignalHandlers !== false) this.setupCleanup();
   }
 
@@ -131,6 +144,7 @@ export class KuriEngine extends EventEmitter {
   }
 
   private async getFreePort(): Promise<number> {
+    if (this.getFreePortImpl) return this.getFreePortImpl();
     return new Promise((resolve, reject) => {
       const server = net.createServer();
       server.unref();
@@ -144,8 +158,16 @@ export class KuriEngine extends EventEmitter {
 
   private async ensureRunning() {
     if (this.baseUrlOverride) return;
-    if (this.kuriProcess) return;
+    if (this.startPromise) return this.startPromise;
+    if (this.kuriProcess && this.kuriProcess.exitCode === null) return;
 
+    this.startPromise = this.startKuri().finally(() => {
+      this.startPromise = null;
+    });
+    return this.startPromise;
+  }
+
+  private async startKuri() {
     this.port = await this.getFreePort();
     console.error(`Starting Kuri process: ${this.kuriPath} on port ${this.port}`);
     const env = {
@@ -160,17 +182,32 @@ export class KuriEngine extends EventEmitter {
       (env as any).KURI_PROXY = this.currentConfig.proxy;
     }
 
-    this.kuriProcess = spawn(this.kuriPath, [], { env, stdio: "pipe", detached: true });
+    const proc = this.spawnImpl!(this.kuriPath, [], { env, stdio: "pipe", detached: true });
+    this.kuriProcess = proc;
+    let processFailure: Error | null = null;
 
-    this.kuriProcess.stderr?.on("data", (data: Buffer) => {
+    proc.stdout?.resume();
+    proc.stderr?.on("data", (data: Buffer) => {
       console.error(`[Kuri] ${data.toString().trim()}`);
     });
 
-    this.kuriProcess.on("error", (err) => {
+    proc.once("error", (err) => {
+      processFailure = err;
       console.error(`Kuri process error: ${err.message}`);
+      if (this.kuriProcess === proc) this.kuriProcess = null;
+    });
+    proc.once("exit", (code, signal) => {
+      if (!processFailure) {
+        processFailure = new Error(`Kuri exited during startup (code=${code}, signal=${signal})`);
+      }
+      if (this.kuriProcess === proc) {
+        this.kuriProcess = null;
+        this.currentTabId = null;
+      }
     });
 
     for (let i = 0; i < 20; i++) {
+      if (processFailure) throw processFailure;
       try {
         const res = await this.fetchImpl(`${this.baseUrl}/health`);
         if (res.ok) {
@@ -183,7 +220,7 @@ export class KuriEngine extends EventEmitter {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    this.killKuri();
+    await this.killKuri();
     throw new Error("Kuri failed to start after 20 seconds");
   }
 
@@ -212,7 +249,7 @@ export class KuriEngine extends EventEmitter {
     return res;
   }
 
-  async configure(args: { preset?: string; userAgent?: string; width?: number; height?: number; proxy?: string; headless?: boolean }) {
+  async configure(args: { preset?: string; userAgent?: string; width?: number; height?: number; proxy?: string; headless?: boolean; tab_id?: string }) {
     let needsRestart = false;
 
     if (args.headless !== undefined && args.headless !== this.currentConfig.headless) {
@@ -246,17 +283,18 @@ export class KuriEngine extends EventEmitter {
     }
 
     if (effectiveWidth && effectiveHeight) {
-      await this.ensureTab();
+      const tabId = await this.ensureTab(args.tab_id);
       const params = new URLSearchParams({
         width: String(effectiveWidth),
         height: String(effectiveHeight),
+        tab_id: tabId,
       });
       if (effectiveUA) params.set("ua", effectiveUA);
       if (effectiveScale !== undefined) params.set("scale", String(effectiveScale));
       await this.request(`/emulate?${params.toString()}`);
     } else if (effectiveUA) {
-      await this.ensureTab();
-      await this.request(`/set/useragent?ua=${encodeURIComponent(effectiveUA)}`);
+      const tabId = await this.ensureTab(args.tab_id);
+      await this.request(`/set/useragent?ua=${encodeURIComponent(effectiveUA)}&tab_id=${encodeURIComponent(tabId)}`);
     }
 
     return {
@@ -277,7 +315,8 @@ export class KuriEngine extends EventEmitter {
     };
   }
 
-  private async ensureTab() {
+  private async ensureTab(tabId?: string): Promise<string> {
+    if (tabId) return tabId;
     if (!this.currentTabId) {
       const resTabs = await this.request("/tabs");
       const tabs = await resTabs.json() as any[];
@@ -289,42 +328,49 @@ export class KuriEngine extends EventEmitter {
         this.currentTabId = dataTab.tab_id;
       }
     }
+    return this.currentTabId!;
   }
 
-  async navigate(url: string) {
-    await this.ensureTab();
+  private withTab(path: string, tabId: string): string {
+    const url = new URL(path, this.baseUrl);
+    url.searchParams.set("tab_id", tabId);
+    return `${url.pathname}${url.search}`;
+  }
+
+  async navigate(url: string, tabId?: string) {
+    const targetTabId = await this.ensureTab(tabId);
 
     if (isLoopbackUrl(url)) {
       const encodedUrl = Buffer.from(url, "utf8").toString("base64");
       const expression = `window.location.assign(atob('${encodedUrl}'))`;
-      await this.request(`/evaluate?expression=${encodeURIComponent(expression)}`);
-      await this.request("/wait?timeout=60000");
+      await this.request(this.withTab(`/evaluate?expression=${encodeURIComponent(expression)}`, targetTabId));
+      await this.request(this.withTab("/wait?timeout=60000", targetTabId));
       return {
         content: [
           {
             type: "text",
-            text: `Navigated to ${url} (Tab: ${this.currentTabId})`,
+            text: `Navigated to ${url} (Tab: ${targetTabId})`,
           },
         ],
       };
     }
 
-    const res = await this.request(`/navigate?url=${encodeURIComponent(url)}`);
+    const res = await this.request(this.withTab(`/navigate?url=${encodeURIComponent(url)}`, targetTabId));
     const data = await res.json() as any;
 
     return {
       content: [
         {
           type: "text",
-          text: `Navigated to ${url}. Title: ${data.title || "Loaded"} (Tab: ${this.currentTabId})`,
+          text: `Navigated to ${url}. Title: ${data.title || "Loaded"} (Tab: ${targetTabId})`,
         },
       ],
     };
   }
 
-  async snapshot(filter: "interactive" | "all" = "interactive") {
-    await this.ensureTab();
-    const res = await this.request(`/snapshot?filter=${filter}&format=compact`);
+  async snapshot(filter: "interactive" | "all" = "interactive", tabId?: string) {
+    const targetTabId = await this.ensureTab(tabId);
+    const res = await this.request(this.withTab(`/snapshot?filter=${filter}&format=compact`, targetTabId));
     const text = await res.text();
     return {
       content: [
@@ -336,10 +382,10 @@ export class KuriEngine extends EventEmitter {
     };
   }
 
-  async click(ref: string) {
-    await this.ensureTab();
+  async click(ref: string, tabId?: string) {
+    const targetTabId = await this.ensureTab(tabId);
     const elementRef = ref.startsWith("@") ? ref.substring(1) : ref;
-    await this.request(`/action?action=click&ref=${elementRef}`);
+    await this.request(this.withTab(`/action?action=click&ref=${elementRef}`, targetTabId));
     return {
       content: [
         {
@@ -350,10 +396,10 @@ export class KuriEngine extends EventEmitter {
     };
   }
 
-  async type(ref: string, text: string) {
-    await this.ensureTab();
+  async type(ref: string, text: string, tabId?: string) {
+    const targetTabId = await this.ensureTab(tabId);
     const elementRef = ref.startsWith("@") ? ref.substring(1) : ref;
-    await this.request(`/action?action=fill&ref=${elementRef}&value=${encodeURIComponent(text)}`);
+    await this.request(this.withTab(`/action?action=fill&ref=${elementRef}&value=${encodeURIComponent(text)}`, targetTabId));
     return {
       content: [
         {
@@ -364,9 +410,9 @@ export class KuriEngine extends EventEmitter {
     };
   }
 
-  async scroll(direction: "up" | "down") {
-    await this.ensureTab();
-    await this.request(`/action?action=scroll&direction=${direction}`);
+  async scroll(direction: "up" | "down", tabId?: string) {
+    const targetTabId = await this.ensureTab(tabId);
+    await this.request(this.withTab(`/action?action=scroll&direction=${direction}`, targetTabId));
     return {
       content: [
         {
@@ -376,10 +422,10 @@ export class KuriEngine extends EventEmitter {
       ],
     };
   }
-  async hover(ref: string) {
-    await this.ensureTab();
+  async hover(ref: string, tabId?: string) {
+    const targetTabId = await this.ensureTab(tabId);
     const elementRef = ref.startsWith("@") ? ref.substring(1) : ref;
-    await this.request(`/action?action=hover&ref=${elementRef}`);
+    await this.request(this.withTab(`/action?action=hover&ref=${elementRef}`, targetTabId));
     return {
       content: [
         {
@@ -389,9 +435,9 @@ export class KuriEngine extends EventEmitter {
       ],
     };
   }
-  async press(key: string) {
-    await this.ensureTab();
-    await this.request(`/action?action=press&value=${encodeURIComponent(key)}`);
+  async press(key: string, tabId?: string) {
+    const targetTabId = await this.ensureTab(tabId);
+    await this.request(this.withTab(`/action?action=press&value=${encodeURIComponent(key)}`, targetTabId));
     return {
       content: [
         {
@@ -401,9 +447,9 @@ export class KuriEngine extends EventEmitter {
       ],
     };
   }
-  async evaluate(script: string) {
-    await this.ensureTab();
-    const res = await this.request(`/evaluate?expression=${encodeURIComponent(script)}`);
+  async evaluate(script: string, tabId?: string) {
+    const targetTabId = await this.ensureTab(tabId);
+    const res = await this.request(this.withTab(`/evaluate?expression=${encodeURIComponent(script)}`, targetTabId));
     const data = await res.json() as any;
     // CDP format: { result: { result: { value: ... } } }
     const value = data.result?.result?.value ?? data.result?.value ?? data.value ?? data;
@@ -424,6 +470,34 @@ export class KuriEngine extends EventEmitter {
         {
           type: "text",
           text: JSON.stringify(tabs, null, 2),
+        },
+      ],
+    };
+  }
+  async newTab() {
+    const res = await this.request("/tab/new?wait=true");
+    const data = await res.json() as any;
+    if (!data.tab_id) throw new Error("Kuri did not return a tab ID");
+    this.currentTabId = data.tab_id;
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Created and selected tab: ${data.tab_id}`,
+        },
+      ],
+    };
+  }
+  async selectTab(tabId: string) {
+    const res = await this.request("/tabs");
+    const tabs = await res.json() as any[];
+    if (!tabs.some((tab) => tab.id === tabId)) throw new Error(`Tab not found: ${tabId}`);
+    this.currentTabId = tabId;
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Selected tab: ${tabId}`,
         },
       ],
     };
@@ -454,10 +528,10 @@ export class KuriEngine extends EventEmitter {
     };
   }
 
-  async read(format: "markdown" | "text" = "markdown") {
-    await this.ensureTab();
+  async read(format: "markdown" | "text" = "markdown", tabId?: string) {
+    const targetTabId = await this.ensureTab(tabId);
     const endpoint = format === "markdown" ? "/markdown" : "/text";
-    const res = await this.request(endpoint);
+    const res = await this.request(this.withTab(endpoint, targetTabId));
     const text = await res.text();
 
     try {
@@ -550,9 +624,9 @@ export class KuriEngine extends EventEmitter {
     return Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), writeChunk("IHDR", ihdr), writeChunk("IDAT", deflateSync(croppedRaw)), writeChunk("IEND", Buffer.alloc(0))]).toString("base64");
   }
 
-  async screenshotImage(path?: string, returnImage: boolean = true, crop?: { x: number; y: number; width: number; height: number }) {
-    await this.ensureTab();
-    const res = await this.request("/screenshot");
+  async screenshotImage(path?: string, returnImage: boolean = true, crop?: { x: number; y: number; width: number; height: number }, tabId?: string) {
+    const targetTabId = await this.ensureTab(tabId);
+    const res = await this.request(this.withTab("/screenshot", targetTabId));
     const data = await res.json() as any;
 
     // Kuri returns { id: N, result: { data: "base64..." } }

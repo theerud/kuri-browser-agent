@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import test from "node:test";
+import type { ChildProcess } from "node:child_process";
 import { isLoopbackUrl, KuriEngine } from "../src/kuri-engine.js";
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -125,4 +128,92 @@ test("configure sends Kuri's ua parameter for presets and custom user agents", a
   assert.equal(emulate.searchParams.has("userAgent"), false);
   const setUserAgent = requests.find((url) => url.pathname === "/set/useragent");
   assert.equal(setUserAgent?.searchParams.get("ua"), "Custom Browser");
+});
+
+test("explicit tab IDs avoid shared selected-tab state", async () => {
+  const requests: URL[] = [];
+  const fetchImpl = async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    requests.push(url);
+    if (url.pathname === "/snapshot") return new Response("snapshot");
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const engine = new KuriEngine({
+    baseUrl: "http://127.0.0.1:18080",
+    fetch: fetchImpl as typeof fetch,
+    installSignalHandlers: false,
+  });
+
+  await engine.snapshot("interactive", "tab-explicit");
+
+  assert.deepEqual(requests.map((url) => url.pathname), ["/snapshot"]);
+  assert.equal(requests[0].searchParams.get("tab_id"), "tab-explicit");
+});
+
+test("new and selected tabs update the default tab", async () => {
+  const requests: URL[] = [];
+  const fetchImpl = async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    requests.push(url);
+    if (url.pathname === "/tab/new") return jsonResponse({ tab_id: "tab-new" });
+    if (url.pathname === "/tabs") return jsonResponse([{ id: "tab-new" }, { id: "tab-other" }]);
+    if (url.pathname === "/snapshot") return new Response("snapshot");
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const engine = new KuriEngine({
+    baseUrl: "http://127.0.0.1:18080",
+    fetch: fetchImpl as typeof fetch,
+    installSignalHandlers: false,
+  });
+
+  await engine.newTab();
+  await engine.selectTab("tab-other");
+  await engine.snapshot();
+
+  const snapshot = requests.find((url) => url.pathname === "/snapshot");
+  assert.equal(snapshot?.searchParams.get("tab_id"), "tab-other");
+});
+
+function fakeChildProcess(pid: number): ChildProcess {
+  const child = new EventEmitter() as ChildProcess;
+  Object.assign(child, {
+    pid,
+    exitCode: null,
+    signalCode: null,
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill: () => true,
+  });
+  return child;
+}
+
+test("concurrent requests share startup and a later request recovers after exit", async () => {
+  const children: ChildProcess[] = [];
+  let spawnCount = 0;
+  const spawnImpl = (() => {
+    const child = fakeChildProcess(1000 + spawnCount++);
+    children.push(child);
+    return child;
+  }) as typeof import("node:child_process").spawn;
+  const fetchImpl = async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/health") return jsonResponse({ ok: true });
+    if (url.pathname === "/tabs") return jsonResponse([]);
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const engine = new KuriEngine({
+    fetch: fetchImpl as typeof fetch,
+    getFreePort: async () => 18080 + spawnCount,
+    spawn: spawnImpl,
+    installSignalHandlers: false,
+  });
+
+  await Promise.all([engine.listTabs(), engine.listTabs()]);
+  assert.equal(spawnCount, 1);
+
+  Object.assign(children[0], { exitCode: 1 });
+  children[0].emit("exit", 1, null);
+  await engine.listTabs();
+
+  assert.equal(spawnCount, 2);
 });

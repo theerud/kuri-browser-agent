@@ -26,6 +26,7 @@ const server = new Server(
 );
 
 const engine = new KuriEngine();
+const tabIdProperty = { type: "string", description: "Optional tab ID. Defaults to the selected tab." };
 
 // Register tool listings
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -43,6 +44,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             height: { type: "number" },
             proxy: { type: "string" },
             headless: { type: "boolean" },
+            tab_id: tabIdProperty,
           },
         },
       },
@@ -53,6 +55,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             url: { type: "string" },
+            tab_id: tabIdProperty,
           },
           required: ["url"],
         },
@@ -64,6 +67,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             filter: { type: "string", enum: ["interactive", "all"] },
+            tab_id: tabIdProperty,
           },
         },
       },
@@ -74,6 +78,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             direction: { type: "string", enum: ["up", "down"] },
+            tab_id: tabIdProperty,
           },
           required: ["direction"],
         },
@@ -85,6 +90,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             ref: { type: "string" },
+            tab_id: tabIdProperty,
           },
           required: ["ref"],
         },
@@ -96,6 +102,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             ref: { type: "string" },
+            tab_id: tabIdProperty,
           },
           required: ["ref"],
         },
@@ -107,6 +114,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             key: { type: "string" },
+            tab_id: tabIdProperty,
           },
           required: ["key"],
         },
@@ -118,6 +126,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             script: { type: "string" },
+            tab_id: tabIdProperty,
           },
           required: ["script"],
         },
@@ -126,6 +135,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         name: "list_tabs",
         description: "List all currently open tabs.",
         inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "new_tab",
+        description: "Create a blank tab and select it for subsequent calls.",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "select_tab",
+        description: "Select an existing tab for subsequent calls.",
+        inputSchema: {
+          type: "object",
+          properties: { tab_id: tabIdProperty },
+          required: ["tab_id"],
+        },
       },
       {
         name: "close_tab",
@@ -155,6 +178,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             format: { type: "string", enum: ["markdown", "text"] },
+            tab_id: tabIdProperty,
           },
         },
       },
@@ -166,6 +190,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             path: { type: "string", description: "Optional workspace path to save the PNG file (e.g., 'tmp/evidence.png')." },
             return_image: { type: "boolean", description: "Whether to return the image to the LLM context. Defaults to true." },
+            tab_id: tabIdProperty,
             crop: {
               type: "object",
               properties: {
@@ -188,6 +213,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             ref: { type: "string", description: "The @eN reference of the element to type into." },
             text: { type: "string", description: "The text to type." },
+            tab_id: tabIdProperty,
           },
           required: ["ref", "text"],
         },
@@ -208,38 +234,43 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 // Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+  const { name } = request.params;
+  const args = (request.params.arguments || {}) as any;
 
   try {
     switch (name) {
       case "configure":
-        return await engine.configure(args as any);
+        return await engine.configure(args);
       case "navigate":
-        return await engine.navigate((args as any).url);
+        return await engine.navigate(args.url, args.tab_id);
       case "snapshot":
-        return await engine.snapshot((args as any).filter);
+        return await engine.snapshot(args.filter, args.tab_id);
       case "scroll":
-        return await engine.scroll((args as any).direction);
+        return await engine.scroll(args.direction, args.tab_id);
       case "click":
-        return await engine.click((args as any).ref);
+        return await engine.click(args.ref, args.tab_id);
       case "type":
-        return await engine.type((args as any).ref, (args as any).text);
+        return await engine.type(args.ref, args.text, args.tab_id);
       case "hover":
-        return await engine.hover((args as any).ref);
+        return await engine.hover(args.ref, args.tab_id);
       case "press":
-        return await engine.press((args as any).key);
+        return await engine.press(args.key, args.tab_id);
       case "evaluate":
-        return await engine.evaluate((args as any).script);
+        return await engine.evaluate(args.script, args.tab_id);
       case "list_tabs":
         return await engine.listTabs();
+      case "new_tab":
+        return await engine.newTab();
+      case "select_tab":
+        return await engine.selectTab(args.tab_id);
       case "close_tab":
-        return await engine.closeTab((args as any).tab_id);
+        return await engine.closeTab(args.tab_id);
       case "read":
-        return await engine.read((args as any).format);
+        return await engine.read(args.format, args.tab_id);
       case "screenshot":
-        return await engine.screenshotImage((args as any).path, (args as any).return_image, (args as any).crop);
+        return await engine.screenshotImage(args.path, args.return_image, args.crop, args.tab_id);
       case "wait":
-        return await engine.wait((args as any).delay_ms);
+        return await engine.wait(args.delay_ms);
       case "restart":
         return await engine.restart();
       default:
