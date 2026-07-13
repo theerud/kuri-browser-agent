@@ -56,7 +56,7 @@ const PRESETS: Record<string, Preset> = {
 export class KuriEngine extends EventEmitter {
   private kuriProcess: ChildProcess | null = null;
   private port: number = 8080;
-  private get baseUrl(): string { return `http://127.0.0.1:${this.port}`; }
+  private get baseUrl(): string { return this.baseUrlOverride || `http://127.0.0.1:${this.port}`; }
   private sessionId: string = `mcp-session-${Math.random().toString(36).substring(7)}`;
   private kuriPath: string = "kuri";
   private apiToken: string = process.env.KURI_API_TOKEN || randomBytes(24).toString("hex");
@@ -65,10 +65,14 @@ export class KuriEngine extends EventEmitter {
     headless: true,
     proxy: null,
   };
+  private readonly baseUrlOverride?: string;
+  private readonly fetchImpl: typeof fetch;
 
-  constructor() {
+  constructor(options: { baseUrl?: string; fetch?: typeof fetch; installSignalHandlers?: boolean } = {}) {
     super();
-    this.setupCleanup();
+    this.baseUrlOverride = options.baseUrl;
+    this.fetchImpl = options.fetch || fetch;
+    if (options.installSignalHandlers !== false) this.setupCleanup();
   }
 
   private setupCleanup() {
@@ -126,6 +130,7 @@ export class KuriEngine extends EventEmitter {
   }
 
   private async ensureRunning() {
+    if (this.baseUrlOverride) return;
     if (this.kuriProcess) return;
 
     this.port = await this.getFreePort();
@@ -154,7 +159,7 @@ export class KuriEngine extends EventEmitter {
 
     for (let i = 0; i < 20; i++) {
       try {
-        const res = await fetch(`${this.baseUrl}/health`);
+        const res = await this.fetchImpl(`${this.baseUrl}/health`);
         if (res.ok) {
           console.error(`Kuri is healthy on port ${this.port}`);
           return;
@@ -177,7 +182,7 @@ export class KuriEngine extends EventEmitter {
       urlObj.searchParams.set("tab_id", this.currentTabId);
     }
 
-    const res = await fetch(urlObj.toString(), {
+    const res = await this.fetchImpl(urlObj.toString(), {
       ...options,
       headers: {
         ...options.headers,
@@ -573,4 +578,3 @@ export class KuriEngine extends EventEmitter {
     };
 }
 }
-
