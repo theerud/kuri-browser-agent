@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- MCP contract tests and CI coverage for browser requests, lifecycle recovery, Gemini manifest portability, input validation, and PNG handling.
+- Explicit `new_tab` and `select_tab` tools, plus optional `tab_id` targeting on browser actions for concurrent callers.
+
+### Fixed
+- Localhost navigation now bypasses Kuri's public-URL SSRF guard through the active browser tab, allowing agents to inspect local development servers.
+- Kuri startup is serialized, retries one transient failure, recovers after child exit, and uses an isolated Chrome profile per MCP server instance.
+- Device emulation now uses Kuri's `ua` parameter, and screenshots no longer advertise an unsupported element-reference crop.
+- Gemini resolves the MCP server relative to the installed extension and exposes settings through their environment variables.
+- Screenshot writes are limited to PNG files inside the workspace, with bounded viewport, delay, and crop inputs.
+- Setup detects unsupported runtimes, missing dependencies, and stale builds instead of checking only for `dist/index.js`.
+
 ## [0.5.0] - 2026-07-08
 
 ### Added
