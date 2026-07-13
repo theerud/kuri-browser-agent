@@ -13,18 +13,18 @@ A lightweight, token-efficient browser automation extension powered by the [Kuri
 
 ## Prerequisites
 
-1. **Kuri Binary**: You must have the `kuri` binary installed on your system.
+1. **Kuri Binary 0.4.1+**: You must have the `kuri` binary installed on your system.
    ```bash
    curl -fsSL https://raw.githubusercontent.com/justrach/kuri/main/install.sh | sh
    ```
-2. **Node.js**: Required to run the MCP bridge.
+2. **Node.js 22.2.0+**: Required to run the MCP bridge.
 
 ## Installation
 
 1. Clone or download this repository.
 2. Build the MCP server:
    ```bash
-   cd claude-code/mcp-server && npm install && npm run build
+   cd claude-code/mcp-server && npm ci && npm run build
    ```
 3. Link the extension to Gemini CLI:
    ```bash
@@ -65,7 +65,7 @@ After that, the `kuri` skill and the `kuri-agent` / `ui-reviewer` subagents acti
 
 Point Claude Code at the plugin directory in a built clone:
 ```bash
-cd claude-code/mcp-server && npm install && npm run build   # build once
+cd claude-code/mcp-server && npm ci && npm run build   # build once
 claude --plugin-dir ./claude-code
 ```
 

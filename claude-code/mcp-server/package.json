@@ -1,8 +1,11 @@
 {
   "name": "kuri",
   "version": "0.5.0",
-  "description": "",
+  "description": "MCP bridge for the Kuri browser engine",
   "type": "module",
+  "engines": {
+    "node": ">=22.2.0"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
