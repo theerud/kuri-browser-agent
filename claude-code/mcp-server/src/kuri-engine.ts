@@ -14,6 +14,19 @@ interface Preset {
   deviceScaleFactor?: number;
 }
 
+export function isLoopbackUrl(value: string): boolean {
+  let hostname: string;
+  try {
+    hostname = new URL(value).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return false;
+  }
+  hostname = hostname.replace(/^\[(.*)\]$/, "$1");
+  if (hostname === "localhost" || hostname === "localhost.localdomain" || hostname === "::1") return true;
+  if (hostname.endsWith(".localhost") || hostname.endsWith(".localhost.localdomain")) return true;
+  return /^127(?:\.\d{1,3}){3}$/.test(hostname);
+}
+
 const PRESETS: Record<string, Preset> = {
   desktop_chrome: {
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -238,10 +251,12 @@ export class KuriEngine extends EventEmitter {
         width: String(effectiveWidth),
         height: String(effectiveHeight),
       });
-      if (effectiveUA) params.set("userAgent", effectiveUA);
-      if (effectiveMobile !== undefined) params.set("mobile", String(effectiveMobile));
+      if (effectiveUA) params.set("ua", effectiveUA);
       if (effectiveScale !== undefined) params.set("scale", String(effectiveScale));
       await this.request(`/emulate?${params.toString()}`);
+    } else if (effectiveUA) {
+      await this.ensureTab();
+      await this.request(`/set/useragent?ua=${encodeURIComponent(effectiveUA)}`);
     }
 
     return {
@@ -252,7 +267,7 @@ export class KuriEngine extends EventEmitter {
             preset: args.preset,
             userAgent: effectiveUA,
             viewport: effectiveWidth ? `${effectiveWidth}x${effectiveHeight}` : "default",
-            mobile: effectiveMobile,
+            mobilePreset: effectiveMobile,
             deviceScaleFactor: effectiveScale,
             proxy: this.currentConfig.proxy,
             headless: this.currentConfig.headless
@@ -279,7 +294,21 @@ export class KuriEngine extends EventEmitter {
   async navigate(url: string) {
     await this.ensureTab();
 
-    // 2. Navigate the tab
+    if (isLoopbackUrl(url)) {
+      const encodedUrl = Buffer.from(url, "utf8").toString("base64");
+      const expression = `window.location.assign(atob('${encodedUrl}'))`;
+      await this.request(`/evaluate?expression=${encodeURIComponent(expression)}`);
+      await this.request("/wait?timeout=60000");
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Navigated to ${url} (Tab: ${this.currentTabId})`,
+          },
+        ],
+      };
+    }
+
     const res = await this.request(`/navigate?url=${encodeURIComponent(url)}`);
     const data = await res.json() as any;
 
@@ -521,11 +550,9 @@ export class KuriEngine extends EventEmitter {
     return Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), writeChunk("IHDR", ihdr), writeChunk("IDAT", deflateSync(croppedRaw)), writeChunk("IEND", Buffer.alloc(0))]).toString("base64");
   }
 
-  async screenshotImage(ref?: string, path?: string, returnImage: boolean = true, crop?: { x: number; y: number; width: number; height: number }) {
+  async screenshotImage(path?: string, returnImage: boolean = true, crop?: { x: number; y: number; width: number; height: number }) {
     await this.ensureTab();
-    const elementRef = ref ? (ref.startsWith("@") ? ref.substring(1) : ref) : null;
-    const endpoint = elementRef ? `/screenshot?ref=${elementRef}` : "/screenshot";
-    const res = await this.request(endpoint);
+    const res = await this.request("/screenshot");
     const data = await res.json() as any;
 
     // Kuri returns { id: N, result: { data: "base64..." } }

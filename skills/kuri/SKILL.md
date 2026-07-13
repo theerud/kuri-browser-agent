@@ -19,7 +19,7 @@ Use the available `mcp_kuri_*` tools to interact with the browser:
 
 ### 2. Observation (Seeing the Page)
 - **Snapshot**: Get the compact accessibility tree. **Primary tool for finding elements.** `mcp_kuri_snapshot()` -> Result: `[Link] "Login" @e4`
-- **Screenshot**: Visual capture. Use for CAPTCHAs or layout verification. ◦ `mcp_kuri_screenshot(crop={x, y, w, h})`
+- **Screenshot**: Visual capture. Use for CAPTCHAs or layout verification. Use coordinate cropping to isolate a region. `mcp_kuri_screenshot(crop={x, y, width, height})`
 - **Read**: Extract full text or markdown. `mcp_kuri_read(format="markdown")`
 
 ### 3. Interaction (Acting on Elements)
@@ -50,6 +50,6 @@ Use these presets in `mcp_kuri_configure` to quickly change the browser's identi
 - **Volatility**: `@eN` references change whenever the page content updates. Always take a new `mcp_kuri_snapshot` after clicking or navigating.
 - **Wait for Load**: `mcp_kuri_navigate` waits for the page to be interactive, but some dynamic content may take longer. If you don't see what you expect, take another snapshot after a brief pause.
 - **Token Economy**: Prefer `mcp_kuri_snapshot` over reading the full page content (`mcp_kuri_read`) or taking screenshots (`mcp_kuri_screenshot`) unless you need to summarize large amounts of text or perform visual analysis.
-- **Visual Analysis**: Use `mcp_kuri_screenshot` when you need to solve puzzles (like CAPTCHAs), verify layouts, or understand non-textual elements. Prefer element-level cropping (by providing a `ref`) to save tokens and improve model focus.
+- **Visual Analysis**: Use `mcp_kuri_screenshot` when you need to solve puzzles (like CAPTCHAs), verify layouts, or understand non-textual elements. Prefer coordinate cropping to save tokens and improve model focus.
 - **File Saving**: Use the `path` parameter to save evidence directly to the workspace. Set `return_image: false` to save tokens if you only need to save the file and don't need to analyze the image yourself.
-- **Cropping**: Use the `crop` parameter to isolate regions of interest. This is highly effective for visual tasks like CAPTCHA solving. If element-level cropping (`ref`) fails or returns the full page, use `crop` with coordinates instead.
+- **Cropping**: Use the `crop` parameter to isolate regions of interest. This is highly effective for visual tasks like CAPTCHA solving.

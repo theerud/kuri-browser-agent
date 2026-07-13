@@ -160,11 +160,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "screenshot",
-        description: "Take a PNG screenshot of the viewport or a specific element.",
+        description: "Take a PNG screenshot of the viewport, optionally cropped to coordinates.",
         inputSchema: {
           type: "object",
           properties: {
-            ref: { type: "string", description: "Optional @eN reference to crop the screenshot to a specific element." },
             path: { type: "string", description: "Optional workspace path to save the PNG file (e.g., 'tmp/evidence.png')." },
             return_image: { type: "boolean", description: "Whether to return the image to the LLM context. Defaults to true." },
             crop: {
@@ -238,7 +237,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "read":
         return await engine.read((args as any).format);
       case "screenshot":
-        return await engine.screenshotImage((args as any).ref, (args as any).path, (args as any).return_image, (args as any).crop);
+        return await engine.screenshotImage((args as any).path, (args as any).return_image, (args as any).crop);
       case "wait":
         return await engine.wait((args as any).delay_ms);
       case "restart":
