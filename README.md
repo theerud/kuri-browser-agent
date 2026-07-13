@@ -89,7 +89,7 @@ Claude exposes the tools under the `mcp__kuri__*` namespace (e.g. `mcp__kuri__na
 - `mcp_kuri_click` / `mcp_kuri_type`: Interact with elements using `@eN` references.
 - `mcp_kuri_scroll` / `mcp_kuri_hover` / `mcp_kuri_press`: High-fidelity interaction tools.
 - `mcp_kuri_read`: Extract full page text or Markdown.
-- `mcp_kuri_screenshot`: Take viewport screenshots with optional coordinate cropping.
+- `mcp_kuri_screenshot`: Take viewport screenshots with optional coordinate cropping and PNG saving inside the workspace.
 - `mcp_kuri_evaluate`: Execute custom JavaScript in the browser.
 - `mcp_kuri_configure`: Set device presets, proxies, or user agents.
 - `mcp_kuri_wait`: Server-side delay for timing-sensitive tasks.

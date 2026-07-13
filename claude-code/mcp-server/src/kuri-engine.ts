@@ -3,8 +3,8 @@ import { EventEmitter } from "events";
 import { randomBytes } from "node:crypto";
 import net from "net";
 import fs from "node:fs";
-import { dirname, join } from "node:path";
-import { inflateSync, deflateSync, crc32 } from "node:zlib";
+import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { PngCropper, Rect } from "./png-cropper.js";
 
 export interface KuriEngineOptions {
   baseUrl?: string;
@@ -13,6 +13,7 @@ export interface KuriEngineOptions {
   installSignalHandlers?: boolean;
   spawn?: typeof spawn;
   env?: NodeJS.ProcessEnv;
+  workspaceRoot?: string;
 }
 
 interface Preset {
@@ -95,6 +96,7 @@ export class KuriEngine extends EventEmitter {
   private readonly getFreePortImpl?: () => Promise<number>;
   private readonly spawnImpl: KuriEngineOptions["spawn"];
   private readonly env: NodeJS.ProcessEnv;
+  private readonly workspaceRoot: string;
 
   constructor(options: KuriEngineOptions = {}) {
     super();
@@ -103,6 +105,7 @@ export class KuriEngine extends EventEmitter {
     this.getFreePortImpl = options.getFreePort;
     this.spawnImpl = options.spawn || spawn;
     this.env = options.env || process.env;
+    this.workspaceRoot = resolve(options.workspaceRoot || this.env.KURI_WORKSPACE_ROOT || process.cwd());
     this.kuriPath = this.env.KURI_PATH || "kuri";
     this.apiToken = this.env.KURI_API_TOKEN || randomBytes(24).toString("hex");
     this.currentConfig = {
@@ -261,6 +264,13 @@ export class KuriEngine extends EventEmitter {
   }
 
   async configure(args: { preset?: string; userAgent?: string; width?: number; height?: number; proxy?: string; headless?: boolean; tab_id?: string }) {
+    if (args.preset && !PRESETS[args.preset]) throw new Error(`unknown browser preset: ${args.preset}`);
+    if (!args.preset && (args.width === undefined) !== (args.height === undefined)) {
+      throw new Error("width and height must be provided together");
+    }
+    if (args.width !== undefined && args.height !== undefined) {
+      this.validateViewport(args.width, args.height);
+    }
     let needsRestart = false;
 
     if (args.headless !== undefined && args.headless !== this.currentConfig.headless) {
@@ -291,6 +301,13 @@ export class KuriEngine extends EventEmitter {
       effectiveHeight = effectiveHeight || p.height;
       effectiveMobile = p.mobile;
       effectiveScale = p.deviceScaleFactor;
+    }
+
+    if ((effectiveWidth === undefined) !== (effectiveHeight === undefined)) {
+      throw new Error("width and height must be provided together");
+    }
+    if (effectiveWidth !== undefined && effectiveHeight !== undefined) {
+      this.validateViewport(effectiveWidth, effectiveHeight);
     }
 
     if (effectiveWidth && effectiveHeight) {
@@ -324,6 +341,15 @@ export class KuriEngine extends EventEmitter {
         },
       ],
     };
+  }
+
+  private validateViewport(width: number, height: number) {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+      throw new Error("viewport dimensions must be positive integers");
+    }
+    if (width > 8192 || height > 8192 || width * height > 16_777_216) {
+      throw new Error("viewport is too large");
+    }
   }
 
   private async ensureTab(tabId?: string): Promise<string> {
@@ -528,6 +554,9 @@ export class KuriEngine extends EventEmitter {
     };
   }
   async wait(delayMs: number) {
+    if (!Number.isInteger(delayMs) || delayMs < 0 || delayMs > 60_000) {
+      throw new Error("delay_ms must be an integer between 0 and 60000");
+    }
     await new Promise(resolve => setTimeout(resolve, delayMs));
     return {
       content: [
@@ -569,73 +598,21 @@ export class KuriEngine extends EventEmitter {
       };
     }
   }
-  private async cropImage(buffer: Buffer, rect: { x: number; y: number; width: number; height: number }): Promise<string> {
-    if (buffer.slice(0, 8).toString("hex") !== "89504e470d0a1a0a") {
-      throw new Error("Invalid PNG signature");
+  private resolveOutputPath(path: string): string {
+    const target = resolve(this.workspaceRoot, path);
+    const relativePath = relative(this.workspaceRoot, target);
+    if (relativePath === "" || relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+      throw new Error("screenshot path must stay within the workspace");
     }
-
-    let offset = 8;
-    let width = 0, height = 0, colorType = 0;
-    const idats: Buffer[] = [];
-
-    while (offset < buffer.length) {
-      const length = buffer.readUInt32BE(offset);
-      const type = buffer.slice(offset + 4, offset + 8).toString("ascii");
-      const data = buffer.slice(offset + 8, offset + 8 + length);
-      if (type === "IHDR") {
-        width = data.readUInt32BE(0);
-        height = data.readUInt32BE(4);
-        colorType = data[9];
-      } else if (type === "IDAT") {
-        idats.push(data);
-      } else if (type === "IEND") break;
-      offset += length + 12;
+    if (extname(target).toLowerCase() !== ".png") {
+      throw new Error("screenshot path must use a .png extension");
     }
-
-    const bpp = colorType === 6 ? 4 : 3;
-    const rawData = inflateSync(Buffer.concat(idats));
-    const rowSize = 1 + width * bpp;
-    const unfiltered = Buffer.alloc(width * height * bpp);
-    for (let y = 0; y < height; y++) {
-      const rowStart = y * rowSize;
-      const filterType = rawData[rowStart];
-      for (let x = 0; x < width * bpp; x++) {
-        const left = x >= bpp ? unfiltered[y * width * bpp + x - bpp] : 0;
-        const up = y > 0 ? unfiltered[(y - 1) * width * bpp + x] : 0;
-        const upLeft = (x >= bpp && y > 0) ? unfiltered[(y - 1) * width * bpp + x - bpp] : 0;
-        let val = rawData[rowStart + 1 + x];
-        if (filterType === 1) val = (val + left) & 0xFF;
-        else if (filterType === 2) val = (val + up) & 0xFF;
-        else if (filterType === 3) val = (val + Math.floor((left + up) / 2)) & 0xFF;
-        else if (filterType === 4) {
-          const p = left + up - upLeft;
-          const pa = Math.abs(p - left), pb = Math.abs(p - up), pc = Math.abs(p - upLeft);
-          val = (val + (pa <= pb && pa <= pc ? left : (pb <= pc ? up : upLeft))) & 0xFF;
-        }
-        unfiltered[y * width * bpp + x] = val;
-      }
-    }
-
-    const targetX = Math.max(0, Math.min(rect.x, width)), targetY = Math.max(0, Math.min(rect.y, height));
-    const targetW = Math.min(rect.width, width - targetX), targetH = Math.min(rect.height, height - targetY);
-    const croppedRaw = Buffer.alloc(targetH * (1 + targetW * bpp));
-    for (let y = 0; y < targetH; y++) {
-      const dstOffset = y * (1 + targetW * bpp);
-      croppedRaw[dstOffset] = 0;
-      unfiltered.copy(croppedRaw, dstOffset + 1, ((targetY + y) * width + targetX) * bpp, ((targetY + y) * width + targetX + targetW) * bpp);
-    }
-
-    const writeChunk = (type: string, data: Buffer) => {
-      const b = Buffer.alloc(8 + data.length + 4);
-      b.writeUInt32BE(data.length, 0); b.write(type, 4); data.copy(b, 8);
-      const c = Buffer.alloc(4 + data.length); c.write(type, 0); data.copy(c, 4);
-      b.writeUInt32BE(crc32(c), 8 + data.length); return b;
-    };
-    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(targetW, 0); ihdr.writeUInt32BE(targetH, 4); ihdr[8] = 8; ihdr[9] = colorType;
-    return Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), writeChunk("IHDR", ihdr), writeChunk("IDAT", deflateSync(croppedRaw)), writeChunk("IEND", Buffer.alloc(0))]).toString("base64");
+    return target;
   }
 
-  async screenshotImage(path?: string, returnImage: boolean = true, crop?: { x: number; y: number; width: number; height: number }, tabId?: string) {
+  async screenshotImage(path?: string, returnImage: boolean = true, crop?: Rect, tabId?: string) {
+    if (!returnImage && !path) throw new Error("return_image=false requires a path");
+    const outputPath = path ? this.resolveOutputPath(path) : undefined;
     const targetTabId = await this.ensureTab(tabId);
     const res = await this.request(this.withTab("/screenshot", targetTabId));
     const data = await res.json() as any;
@@ -646,17 +623,32 @@ export class KuriEngine extends EventEmitter {
       throw new Error(`Kuri screenshot failed: ${JSON.stringify(data)}`);
     }
 
-    // Apply cropping if requested
     if (crop) {
-      base64 = await this.cropImage(Buffer.from(base64, "base64"), crop);
+      base64 = PngCropper.crop(Buffer.from(base64, "base64"), crop).toString("base64");
     }
 
-    if (path) {
-      const dirPath = dirname(path);
+    if (outputPath) {
+      const dirPath = dirname(outputPath);
+      const workspaceRealPath = fs.realpathSync(this.workspaceRoot);
+      let existingAncestor = dirPath;
+      while (!fs.existsSync(existingAncestor)) existingAncestor = dirname(existingAncestor);
+      const ancestorRealPath = fs.realpathSync(existingAncestor);
+      const ancestorRelativePath = relative(workspaceRealPath, ancestorRealPath);
+      if (ancestorRelativePath === ".." || ancestorRelativePath.startsWith(`..${sep}`) || isAbsolute(ancestorRelativePath)) {
+        throw new Error("screenshot path resolves outside the workspace");
+      }
       if (dirPath && dirPath !== "." && !fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });
       }
-      fs.writeFileSync(path, Buffer.from(base64, "base64"));
+      const outputDirRealPath = fs.realpathSync(dirPath);
+      const outputDirRelativePath = relative(workspaceRealPath, outputDirRealPath);
+      if (outputDirRelativePath === ".." || outputDirRelativePath.startsWith(`..${sep}`) || isAbsolute(outputDirRelativePath)) {
+        throw new Error("screenshot path resolves outside the workspace");
+      }
+      if (fs.existsSync(outputPath) && fs.lstatSync(outputPath).isSymbolicLink()) {
+        throw new Error("screenshot path cannot be a symbolic link");
+      }
+      fs.writeFileSync(outputPath, Buffer.from(base64, "base64"));
     }
 
     const content: any[] = [];
@@ -666,10 +658,10 @@ export class KuriEngine extends EventEmitter {
         data: base64,
         mimeType: "image/png",
       });
-    } else if (path) {
+    } else if (outputPath) {
       content.push({
         type: "text",
-        text: `Screenshot saved to ${path}`,
+        text: `Screenshot saved to ${outputPath}`,
       });
     }
 

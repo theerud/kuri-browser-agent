@@ -7,7 +7,6 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
 import { KuriEngine } from "./kuri-engine.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -40,8 +39,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             preset: { type: "string", enum: ["desktop_chrome", "desktop_safari", "iphone_15", "pixel_8", "tablet_ipad", "bot_google"] },
             userAgent: { type: "string" },
-            width: { type: "number" },
-            height: { type: "number" },
+            width: { type: "integer", minimum: 1, maximum: 8192 },
+            height: { type: "integer", minimum: 1, maximum: 8192 },
             proxy: { type: "string" },
             headless: { type: "boolean" },
             tab_id: tabIdProperty,
@@ -166,7 +165,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            delay_ms: { type: "number", description: "Delay in milliseconds." },
+            delay_ms: { type: "integer", minimum: 0, maximum: 60000, description: "Delay in milliseconds." },
           },
           required: ["delay_ms"],
         },
@@ -194,10 +193,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             crop: {
               type: "object",
               properties: {
-                x: { type: "number" },
-                y: { type: "number" },
-                width: { type: "number" },
-                height: { type: "number" },
+                x: { type: "integer", minimum: 0 },
+                y: { type: "integer", minimum: 0 },
+                width: { type: "integer", minimum: 1, maximum: 8192 },
+                height: { type: "integer", minimum: 1, maximum: 8192 },
               },
               required: ["x", "y", "width", "height"],
               description: "Optional region to crop from the screenshot.",

@@ -60,5 +60,5 @@ Use these presets in `mcp__kuri__configure` to quickly change the browser's iden
 - **Wait for Load**: `mcp__kuri__navigate` waits for the page to be interactive, but some dynamic content may take longer. If you don't see what you expect, take another snapshot after a brief pause.
 - **Token Economy**: Prefer `mcp__kuri__snapshot` over reading the full page content (`mcp__kuri__read`) or taking screenshots (`mcp__kuri__screenshot`) unless you need to summarize large amounts of text or perform visual analysis.
 - **Visual Analysis**: Use `mcp__kuri__screenshot` when you need to solve puzzles (like CAPTCHAs), verify layouts, or understand non-textual elements. Prefer coordinate cropping to save tokens and improve model focus.
-- **File Saving**: Use the `path` parameter to save evidence directly to the workspace. Set `return_image: false` to save tokens if you only need to save the file and don't need to analyze the image yourself.
+- **File Saving**: Use a workspace-relative `.png` path to save evidence directly to the workspace. Set `return_image: false` to save tokens if you only need to save the file and don't need to analyze the image yourself.
 - **Cropping**: Use the `crop` parameter to isolate regions of interest. This is highly effective for visual tasks like CAPTCHA solving.

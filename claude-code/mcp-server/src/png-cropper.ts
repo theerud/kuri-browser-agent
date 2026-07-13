@@ -1,4 +1,4 @@
-import { inflateSync, deflateSync, crc32 } from "node:zlib";
+import { deflateSync, inflateSync, crc32 } from "node:zlib";
 
 export interface Rect {
   x: number;
@@ -7,30 +7,36 @@ export interface Rect {
   height: number;
 }
 
+const PNG_SIGNATURE = Buffer.from("89504e470d0a1a0a", "hex");
+const MAX_PIXELS = 40_000_000;
+
 export class PngCropper {
   static crop(buffer: Buffer, rect: Rect): Buffer {
-    // 1. Parse Basic Structure
-    if (buffer.slice(0, 8).toString("hex") !== "89504e470d0a1a0a") {
+    this.validateRect(rect);
+    if (buffer.length < 8 || !buffer.subarray(0, 8).equals(PNG_SIGNATURE)) {
       throw new Error("Invalid PNG signature");
     }
 
     let offset = 8;
-    let width = 0, height = 0, bitDepth = 0, colorType = 0;
+    let width = 0;
+    let height = 0;
+    let colorType = 0;
     const idats: Buffer[] = [];
 
-    while (offset < buffer.length) {
+    while (offset + 12 <= buffer.length) {
       const length = buffer.readUInt32BE(offset);
-      const type = buffer.slice(offset + 4, offset + 8).toString("ascii");
-      const data = buffer.slice(offset + 8, offset + 8 + length);
-
+      if (length > buffer.length - offset - 12) throw new Error("Invalid PNG chunk length");
+      const type = buffer.subarray(offset + 4, offset + 8).toString("ascii");
+      const data = buffer.subarray(offset + 8, offset + 8 + length);
       if (type === "IHDR") {
+        if (length !== 13) throw new Error("Invalid PNG header");
         width = data.readUInt32BE(0);
         height = data.readUInt32BE(4);
-        bitDepth = data[8];
         colorType = data[9];
-        if (bitDepth !== 8 || (colorType !== 2 && colorType !== 6)) {
-          throw new Error(`Unsupported PNG format: depth=${bitDepth}, type=${colorType}. Only 8-bit RGB/RGBA supported.`);
+        if (data[8] !== 8 || (colorType !== 2 && colorType !== 6) || data[12] !== 0) {
+          throw new Error("Only non-interlaced 8-bit RGB/RGBA PNGs are supported");
         }
+        if (!width || !height || width * height > MAX_PIXELS) throw new Error("PNG dimensions are invalid or too large");
       } else if (type === "IDAT") {
         idats.push(data);
       } else if (type === "IEND") {
@@ -39,88 +45,83 @@ export class PngCropper {
       offset += length + 12;
     }
 
-    const bpp = colorType === 6 ? 4 : 3; // bytes per pixel
-    const rawData = inflateSync(Buffer.concat(idats));
-    const rowSize = 1 + width * bpp;
+    if (!width || !height || idats.length === 0) throw new Error("PNG is missing required chunks");
+    if (rect.x + rect.width > width || rect.y + rect.height > height) {
+      throw new Error("crop rectangle exceeds PNG bounds");
+    }
 
-    // 2. Unfilter and Crop in one pass (assuming filter 0 for simplicity, or handling all)
-    // Most agent-friendly browsers use filter 0 or very simple ones. 
-    // To be robust, let's implement unfiltering for all 5 types.
-    const unfiltered = Buffer.alloc(width * height * bpp);
+    const bytesPerPixel = colorType === 6 ? 4 : 3;
+    const rowSize = 1 + width * bytesPerPixel;
+    const rawData = inflateSync(Buffer.concat(idats), { maxOutputLength: rowSize * height });
+    if (rawData.length !== rowSize * height) throw new Error("PNG image data has an unexpected size");
+
+    const unfiltered = Buffer.alloc(width * height * bytesPerPixel);
     for (let y = 0; y < height; y++) {
       const rowStart = y * rowSize;
       const filterType = rawData[rowStart];
-      const rowData = rawData.slice(rowStart + 1, rowStart + rowSize);
-      const prevRowStart = (y - 1) * width * bpp;
-
-      for (let x = 0; x < width * bpp; x++) {
-        const left = x >= bpp ? unfiltered[y * width * bpp + x - bpp] : 0;
-        const up = y > 0 ? unfiltered[prevRowStart + x] : 0;
-        const upLeft = (x >= bpp && y > 0) ? unfiltered[prevRowStart + x - bpp] : 0;
-
-        let val = rowData[x];
-        if (filterType === 1) val = (val + left) & 0xFF;
-        else if (filterType === 2) val = (val + up) & 0xFF;
-        else if (filterType === 3) val = (val + Math.floor((left + up) / 2)) & 0xFF;
-        else if (filterType === 4) {
-          const p = left + up - upLeft;
-          const pa = Math.abs(p - left);
-          const pb = Math.abs(p - up);
-          const pc = Math.abs(p - upLeft);
-          const paeth = (pa <= pb && pa <= pc) ? left : (pb <= pc ? up : upLeft);
-          val = (val + paeth) & 0xFF;
-        }
-        unfiltered[y * width * bpp + x] = val;
+      if (filterType > 4) throw new Error(`Unsupported PNG filter: ${filterType}`);
+      for (let x = 0; x < width * bytesPerPixel; x++) {
+        const outputIndex = y * width * bytesPerPixel + x;
+        const left = x >= bytesPerPixel ? unfiltered[outputIndex - bytesPerPixel] : 0;
+        const up = y > 0 ? unfiltered[outputIndex - width * bytesPerPixel] : 0;
+        const upLeft = x >= bytesPerPixel && y > 0 ? unfiltered[outputIndex - width * bytesPerPixel - bytesPerPixel] : 0;
+        let value = rawData[rowStart + 1 + x];
+        if (filterType === 1) value = (value + left) & 0xff;
+        else if (filterType === 2) value = (value + up) & 0xff;
+        else if (filterType === 3) value = (value + Math.floor((left + up) / 2)) & 0xff;
+        else if (filterType === 4) value = (value + this.paeth(left, up, upLeft)) & 0xff;
+        unfiltered[outputIndex] = value;
       }
     }
 
-    // 3. Extract Region
-    const targetX = Math.max(0, Math.min(rect.x, width));
-    const targetY = Math.max(0, Math.min(rect.y, height));
-    const targetW = Math.min(rect.width, width - targetX);
-    const targetH = Math.min(rect.height, height - targetY);
-
-    const croppedRaw = Buffer.alloc(targetH * (1 + targetW * bpp));
-    for (let y = 0; y < targetH; y++) {
-      const srcY = targetY + y;
-      const srcOffset = (srcY * width + targetX) * bpp;
-      const dstOffset = y * (1 + targetW * bpp);
-      croppedRaw[dstOffset] = 0; // Filter None for output
-      unfiltered.copy(croppedRaw, dstOffset + 1, srcOffset, srcOffset + targetW * bpp);
+    const croppedRowSize = 1 + rect.width * bytesPerPixel;
+    const croppedRaw = Buffer.alloc(rect.height * croppedRowSize);
+    for (let y = 0; y < rect.height; y++) {
+      const sourceStart = ((rect.y + y) * width + rect.x) * bytesPerPixel;
+      const destinationStart = y * croppedRowSize;
+      croppedRaw[destinationStart] = 0;
+      unfiltered.copy(croppedRaw, destinationStart + 1, sourceStart, sourceStart + rect.width * bytesPerPixel);
     }
 
-    // 4. Rebuild PNG
-    const newIhdr = Buffer.alloc(13);
-    newIhdr.writeUInt32BE(targetW, 0);
-    newIhdr.writeUInt32BE(targetH, 4);
-    newIhdr.writeUInt8(8, 8);
-    newIhdr.writeUInt8(colorType, 9);
-    newIhdr.writeUInt8(0, 10);
-    newIhdr.writeUInt8(0, 11);
-    newIhdr.writeUInt8(0, 12);
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(rect.width, 0);
+    header.writeUInt32BE(rect.height, 4);
+    header[8] = 8;
+    header[9] = colorType;
+    return Buffer.concat([
+      PNG_SIGNATURE,
+      this.chunk("IHDR", header),
+      this.chunk("IDAT", deflateSync(croppedRaw)),
+      this.chunk("IEND", Buffer.alloc(0)),
+    ]);
+  }
 
-    const idatData = deflateSync(croppedRaw);
+  private static validateRect(rect: Rect) {
+    for (const [name, value] of Object.entries(rect)) {
+      if (!Number.isInteger(value)) throw new Error(`crop ${name} must be an integer`);
+    }
+    if (rect.x < 0 || rect.y < 0 || rect.width < 1 || rect.height < 1) {
+      throw new Error("crop coordinates must be non-negative and dimensions must be positive");
+    }
+    if (rect.width > 8192 || rect.height > 8192 || rect.width * rect.height > 16_777_216) {
+      throw new Error("crop rectangle is too large");
+    }
+  }
 
-    const chunks: Buffer[] = [Buffer.from("89504e470d0a1a0a", "hex")];
-    
-    const writeChunk = (type: string, data: Buffer) => {
-      const b = Buffer.alloc(8 + data.length + 4);
-      b.writeUInt32BE(data.length, 0);
-      b.write(type, 4);
-      data.copy(b, 8);
-      // CRC is calculated over type + data
-      const crcBuffer = Buffer.alloc(4 + data.length);
-      crcBuffer.write(type, 0);
-      data.copy(crcBuffer, 4);
-      // Wait, Node's zlib.crc32 is exactly what we need!
-      b.writeUInt32BE(crc32(crcBuffer), 8 + data.length);
-      chunks.push(b);
-    };
+  private static paeth(left: number, up: number, upLeft: number): number {
+    const prediction = left + up - upLeft;
+    const leftDistance = Math.abs(prediction - left);
+    const upDistance = Math.abs(prediction - up);
+    const upLeftDistance = Math.abs(prediction - upLeft);
+    return leftDistance <= upDistance && leftDistance <= upLeftDistance ? left : upDistance <= upLeftDistance ? up : upLeft;
+  }
 
-    writeChunk("IHDR", newIhdr);
-    writeChunk("IDAT", idatData);
-    writeChunk("IEND", Buffer.alloc(0));
-
-    return Buffer.concat(chunks);
+  private static chunk(type: string, data: Buffer): Buffer {
+    const chunk = Buffer.alloc(12 + data.length);
+    chunk.writeUInt32BE(data.length, 0);
+    chunk.write(type, 4);
+    data.copy(chunk, 8);
+    chunk.writeUInt32BE(crc32(chunk.subarray(4, 8 + data.length)), 8 + data.length);
+    return chunk;
   }
 }

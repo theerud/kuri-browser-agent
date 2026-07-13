@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { crc32, deflateSync } from "node:zlib";
 import test from "node:test";
 import type { ChildProcess } from "node:child_process";
 import { isLoopbackUrl, KuriEngine } from "../src/kuri-engine.js";
+import { PngCropper } from "../src/png-cropper.js";
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -265,4 +269,88 @@ test("Gemini manifest uses portable paths and current setting fields", () => {
     assert.equal(typeof setting.sensitive, "boolean");
     assert.equal("key" in setting, false);
   }
+});
+
+test("viewport and wait limits are enforced at runtime", async () => {
+  const engine = new KuriEngine({
+    baseUrl: "http://127.0.0.1:18080",
+    installSignalHandlers: false,
+  });
+
+  await assert.rejects(engine.configure({ width: 1024 }), /width and height must be provided together/);
+  await assert.rejects(engine.configure({ width: 8192, height: 8192 }), /viewport is too large/);
+  await assert.rejects(engine.wait(-1), /delay_ms must be an integer/);
+  await assert.rejects(engine.wait(60_001), /delay_ms must be an integer/);
+});
+
+test("screenshots can only be written as PNG files inside the workspace", async () => {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), "kuri-workspace-"));
+  const screenshot = Buffer.from("fake png bytes");
+  const fetchImpl = async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/tabs") return jsonResponse([{ id: "tab-1" }]);
+    if (url.pathname === "/screenshot") return jsonResponse({ result: { data: screenshot.toString("base64") } });
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const engine = new KuriEngine({
+    baseUrl: "http://127.0.0.1:18080",
+    fetch: fetchImpl as typeof fetch,
+    workspaceRoot,
+    installSignalHandlers: false,
+  });
+
+  try {
+    const result = await engine.screenshotImage("tmp/evidence.png", false);
+    assert.equal(readFileSync(join(workspaceRoot, "tmp/evidence.png")).equals(screenshot), true);
+    assert.match((result.content[0] as { text: string }).text, /tmp\/evidence\.png$/);
+    await assert.rejects(engine.screenshotImage("../outside.png", false), /must stay within the workspace/);
+    await assert.rejects(engine.screenshotImage("tmp/evidence.jpg", false), /must use a \.png extension/);
+    await assert.rejects(engine.screenshotImage(undefined, false), /requires a path/);
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("PNG cropping rejects invalid rectangles before decoding image data", () => {
+  const notAPng = Buffer.from("not a png");
+  assert.throws(
+    () => PngCropper.crop(notAPng, { x: 0.5, y: 0, width: 1, height: 1 }),
+    /crop x must be an integer/,
+  );
+  assert.throws(
+    () => PngCropper.crop(notAPng, { x: 0, y: 0, width: 0, height: 1 }),
+    /dimensions must be positive/,
+  );
+});
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  chunk.write(type, 4);
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE(crc32(chunk.subarray(4, 8 + data.length)), 8 + data.length);
+  return chunk;
+}
+
+test("PNG cropping produces a bounded RGB image", () => {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(2, 0);
+  header.writeUInt32BE(1, 4);
+  header[8] = 8;
+  header[9] = 2;
+  const source = Buffer.concat([
+    Buffer.from("89504e470d0a1a0a", "hex"),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(Buffer.from([0, 255, 0, 0, 0, 255, 0]))),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+
+  const cropped = PngCropper.crop(source, { x: 1, y: 0, width: 1, height: 1 });
+
+  assert.equal(cropped.readUInt32BE(16), 1);
+  assert.equal(cropped.readUInt32BE(20), 1);
+  assert.throws(
+    () => PngCropper.crop(source, { x: 2, y: 0, width: 1, height: 1 }),
+    /exceeds PNG bounds/,
+  );
 });
