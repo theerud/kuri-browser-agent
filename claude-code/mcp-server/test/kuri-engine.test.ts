@@ -207,6 +207,7 @@ test("concurrent requests share startup and a later request recovers after exit"
     throw new Error(`Unexpected request: ${url}`);
   };
   const engine = new KuriEngine({
+    env: { KURI_HOME: tmpdir() },
     fetch: fetchImpl as typeof fetch,
     getFreePort: async () => 18080 + spawnCount,
     spawn: spawnImpl,
@@ -242,6 +243,7 @@ test("environment settings configure the Kuri process", async () => {
       KURI_PATH: "/opt/kuri/bin/kuri",
       KURI_PROXY: "http://proxy.example:8080",
       KURI_HEADLESS: "false",
+      KURI_HOME: tmpdir(),
     },
     fetch: fetchImpl as typeof fetch,
     getFreePort: async () => 18090,
@@ -254,6 +256,39 @@ test("environment settings configure the Kuri process", async () => {
   assert.equal(command, "/opt/kuri/bin/kuri");
   assert.equal(spawnedEnv?.HEADLESS, "false");
   assert.equal(spawnedEnv?.KURI_PROXY, "http://proxy.example:8080");
+  assert.equal(spawnedEnv?.HOME, tmpdir());
+});
+
+test("a transient Kuri startup exit is retried once", async () => {
+  let spawnCount = 0;
+  const spawnImpl = (() => {
+    const child = fakeChildProcess(1300 + spawnCount++);
+    if (spawnCount === 1) {
+      queueMicrotask(() => {
+        Object.assign(child, { exitCode: 1 });
+        child.emit("exit", 1, null);
+      });
+    }
+    return child;
+  }) as typeof import("node:child_process").spawn;
+  const fetchImpl = async (input: string | URL | Request) => {
+    await Promise.resolve();
+    const url = new URL(String(input));
+    if (url.pathname === "/health") return jsonResponse({ ok: true });
+    if (url.pathname === "/tabs") return jsonResponse([]);
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const engine = new KuriEngine({
+    env: { KURI_HOME: tmpdir() },
+    fetch: fetchImpl as typeof fetch,
+    getFreePort: async () => 18100 + spawnCount,
+    spawn: spawnImpl,
+    installSignalHandlers: false,
+  });
+
+  await engine.listTabs();
+
+  assert.equal(spawnCount, 2);
 });
 
 test("Gemini manifest uses portable paths and current setting fields", () => {

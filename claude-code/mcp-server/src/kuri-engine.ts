@@ -3,7 +3,8 @@ import { EventEmitter } from "events";
 import { randomBytes } from "node:crypto";
 import net from "net";
 import fs from "node:fs";
-import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { PngCropper, Rect } from "./png-cropper.js";
 
 export interface KuriEngineOptions {
@@ -97,6 +98,7 @@ export class KuriEngine extends EventEmitter {
   private readonly spawnImpl: KuriEngineOptions["spawn"];
   private readonly env: NodeJS.ProcessEnv;
   private readonly workspaceRoot: string;
+  private managedKuriHome: string | null = null;
 
   constructor(options: KuriEngineOptions = {}) {
     super();
@@ -122,6 +124,7 @@ export class KuriEngine extends EventEmitter {
           if (this.kuriProcess.pid) process.kill(-this.kuriProcess.pid, "SIGKILL");
         } catch (e) {}
       }
+      this.cleanupManagedKuriHome();
     };
     process.on("exit", cleanup);
     process.on("SIGINT", () => { cleanup(); process.exit(); });
@@ -175,10 +178,35 @@ export class KuriEngine extends EventEmitter {
     if (this.startPromise) return this.startPromise;
     if (this.kuriProcess && this.kuriProcess.exitCode === null) return;
 
-    this.startPromise = this.startKuri().finally(() => {
+    this.startPromise = this.startKuriWithRetry().finally(() => {
       this.startPromise = null;
     });
     return this.startPromise;
+  }
+
+  private async startKuriWithRetry() {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await this.startKuri();
+        return;
+      } catch (error) {
+        await this.killKuri();
+        if (attempt === 2 || (error as NodeJS.ErrnoException).code === "ENOENT") throw error;
+        console.error(`Kuri startup failed; retrying once: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  private getKuriHome(): string {
+    if (this.env.KURI_HOME) return resolve(this.env.KURI_HOME);
+    if (!this.managedKuriHome) this.managedKuriHome = fs.mkdtempSync(join(tmpdir(), "kuri-browser-agent-"));
+    return this.managedKuriHome;
+  }
+
+  private cleanupManagedKuriHome() {
+    if (!this.managedKuriHome) return;
+    try { fs.rmSync(this.managedKuriHome, { recursive: true, force: true }); } catch (e) {}
+    this.managedKuriHome = null;
   }
 
   private async startKuri() {
@@ -186,6 +214,7 @@ export class KuriEngine extends EventEmitter {
     console.error(`Starting Kuri process: ${this.kuriPath} on port ${this.port}`);
     const env = {
       ...this.env,
+      HOME: this.getKuriHome(),
       PORT: this.port.toString(),
       HEADLESS: this.currentConfig.headless.toString(),
       KURI_API_TOKEN: this.apiToken,
@@ -224,12 +253,13 @@ export class KuriEngine extends EventEmitter {
       if (processFailure) throw processFailure;
       try {
         const res = await this.fetchImpl(`${this.baseUrl}/health`);
+        if (processFailure) throw processFailure;
         if (res.ok) {
           console.error(`Kuri is healthy on port ${this.port}`);
           return;
         }
       } catch (e) {
-        // ignore
+        if (processFailure) throw processFailure;
       }
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
@@ -670,6 +700,7 @@ export class KuriEngine extends EventEmitter {
 
   async restart() {
     await this.killKuri();
+    this.cleanupManagedKuriHome();
     this.sessionId = `mcp-session-${Math.random().toString(36).substring(7)}`;
     this.currentTabId = null;
     return {
