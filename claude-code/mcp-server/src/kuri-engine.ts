@@ -12,6 +12,7 @@ export interface KuriEngineOptions {
   getFreePort?: () => Promise<number>;
   installSignalHandlers?: boolean;
   spawn?: typeof spawn;
+  env?: NodeJS.ProcessEnv;
 }
 
 interface Preset {
@@ -20,6 +21,11 @@ interface Preset {
   height: number;
   mobile?: boolean;
   deviceScaleFactor?: number;
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value === "") return fallback;
+  return !["0", "false", "no", "off"].includes(value.toLowerCase());
 }
 
 export function isLoopbackUrl(value: string): boolean {
@@ -80,17 +86,15 @@ export class KuriEngine extends EventEmitter {
   private port: number = 8080;
   private get baseUrl(): string { return this.baseUrlOverride || `http://127.0.0.1:${this.port}`; }
   private sessionId: string = `mcp-session-${Math.random().toString(36).substring(7)}`;
-  private kuriPath: string = "kuri";
-  private apiToken: string = process.env.KURI_API_TOKEN || randomBytes(24).toString("hex");
+  private kuriPath: string;
+  private apiToken: string;
   private currentTabId: string | null = null;
-  private currentConfig: any = {
-    headless: true,
-    proxy: null,
-  };
+  private currentConfig: any;
   private readonly baseUrlOverride?: string;
   private readonly fetchImpl: typeof fetch;
   private readonly getFreePortImpl?: () => Promise<number>;
   private readonly spawnImpl: KuriEngineOptions["spawn"];
+  private readonly env: NodeJS.ProcessEnv;
 
   constructor(options: KuriEngineOptions = {}) {
     super();
@@ -98,6 +102,13 @@ export class KuriEngine extends EventEmitter {
     this.fetchImpl = options.fetch || fetch;
     this.getFreePortImpl = options.getFreePort;
     this.spawnImpl = options.spawn || spawn;
+    this.env = options.env || process.env;
+    this.kuriPath = this.env.KURI_PATH || "kuri";
+    this.apiToken = this.env.KURI_API_TOKEN || randomBytes(24).toString("hex");
+    this.currentConfig = {
+      headless: parseBoolean(this.env.KURI_HEADLESS ?? this.env.HEADLESS, true),
+      proxy: this.env.KURI_PROXY || null,
+    };
     if (options.installSignalHandlers !== false) this.setupCleanup();
   }
 
@@ -171,7 +182,7 @@ export class KuriEngine extends EventEmitter {
     this.port = await this.getFreePort();
     console.error(`Starting Kuri process: ${this.kuriPath} on port ${this.port}`);
     const env = {
-      ...process.env,
+      ...this.env,
       PORT: this.port.toString(),
       HEADLESS: this.currentConfig.headless.toString(),
       KURI_API_TOKEN: this.apiToken,

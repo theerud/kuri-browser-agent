@@ -4,27 +4,29 @@
   "description": "Kuri-powered browser agent extension with MCP bridge.",
   "settings": [
     {
-      "key": "kuriPath",
-      "type": "string",
-      "default": "kuri",
-      "description": "Path to the kuri binary (e.g., /usr/local/bin/kuri)"
+      "name": "Kuri binary path",
+      "description": "Path to the kuri binary (defaults to kuri)",
+      "envVar": "KURI_PATH",
+      "sensitive": false
     },
     {
-      "key": "proxy",
-      "type": "string",
-      "description": "Default proxy URL (e.g., http://user:pass@proxy.com:8080)"
+      "name": "Proxy URL",
+      "description": "Default proxy URL, including credentials if required",
+      "envVar": "KURI_PROXY",
+      "sensitive": true
     },
     {
-      "key": "headless",
-      "type": "boolean",
-      "default": true,
-      "description": "Run the browser in headless mode"
+      "name": "Headless mode",
+      "description": "Whether to run headless (defaults to true)",
+      "envVar": "KURI_HEADLESS",
+      "sensitive": false
     }
   ],
   "mcpServers": {
     "kuri": {
       "command": "node",
-      "args": ["/home/tlt/src/tltsrc/gemini-cli-expr/kuri-browser-agent/claude-code/mcp-server/dist/index.js"]
+      "args": ["${extensionPath}/claude-code/mcp-server/dist/index.js"],
+      "cwd": "${workspacePath}"
     }
   }
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import type { ChildProcess } from "node:child_process";
@@ -216,4 +217,52 @@ test("concurrent requests share startup and a later request recovers after exit"
   await engine.listTabs();
 
   assert.equal(spawnCount, 2);
+});
+
+test("environment settings configure the Kuri process", async () => {
+  let command = "";
+  let spawnedEnv: NodeJS.ProcessEnv | undefined;
+  const spawnImpl = ((nextCommand: string, _args: readonly string[], options: { env?: NodeJS.ProcessEnv }) => {
+    command = nextCommand;
+    spawnedEnv = options.env;
+    return fakeChildProcess(1200);
+  }) as typeof import("node:child_process").spawn;
+  const fetchImpl = async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/health") return jsonResponse({ ok: true });
+    if (url.pathname === "/tabs") return jsonResponse([]);
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  const engine = new KuriEngine({
+    env: {
+      KURI_PATH: "/opt/kuri/bin/kuri",
+      KURI_PROXY: "http://proxy.example:8080",
+      KURI_HEADLESS: "false",
+    },
+    fetch: fetchImpl as typeof fetch,
+    getFreePort: async () => 18090,
+    spawn: spawnImpl,
+    installSignalHandlers: false,
+  });
+
+  await engine.listTabs();
+
+  assert.equal(command, "/opt/kuri/bin/kuri");
+  assert.equal(spawnedEnv?.HEADLESS, "false");
+  assert.equal(spawnedEnv?.KURI_PROXY, "http://proxy.example:8080");
+});
+
+test("Gemini manifest uses portable paths and current setting fields", () => {
+  const manifestUrl = new URL("../../../gemini-extension.json", import.meta.url);
+  const manifest = JSON.parse(readFileSync(manifestUrl, "utf8"));
+
+  assert.equal(manifest.mcpServers.kuri.args[0], "${extensionPath}/claude-code/mcp-server/dist/index.js");
+  assert.equal(manifest.mcpServers.kuri.cwd, "${workspacePath}");
+  assert.equal(manifest.mcpServers.kuri.args[0].includes("/home/"), false);
+  for (const setting of manifest.settings) {
+    assert.equal(typeof setting.name, "string");
+    assert.match(setting.envVar, /^KURI_/);
+    assert.equal(typeof setting.sensitive, "boolean");
+    assert.equal("key" in setting, false);
+  }
 });
